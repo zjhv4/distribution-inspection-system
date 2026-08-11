@@ -14,7 +14,7 @@ Point = tuple[float, float]
 class ModelsConfig:
     intrusion: str = "yolo11n.pt"
     intrusion_profiles: dict[str, str] = field(default_factory=dict)
-    breaker: str = "runs/detect/train/weights/best.pt"
+    breaker: str | None = None
     breaker_classifier: str | None = None
     breaker_anomaly: str | None = None
     breaker_anomaly_calibration: str | None = None

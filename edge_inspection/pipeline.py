@@ -62,6 +62,8 @@ def run_video(
             if config.breaker.mode == "roi_hybrid":
                 breaker_anomaly_scorer = build_breaker_anomaly_scorer(config)
         elif config.breaker.mode in {"detection", "detection_hybrid"}:
+            if not config.models.breaker:
+                raise RuntimeError(f"breaker.mode={config.breaker.mode} requires models.breaker.")
             breaker_model = YoloDetector(
                 config.models.breaker,
                 device=config.runtime.device,

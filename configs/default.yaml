@@ -4,7 +4,8 @@ models:
   intrusion_profiles:
     power_visible: models/intrusion_power_visible_yolo11l.pt
     legacy_mixed: models/intrusion_legacy_mixed_yolo11l.pt
-  breaker: models/breaker_open_close_yolo11n.pt
+  # 配置经现场设备数据验收的状态模型后再启用断路器任务。
+  breaker:
   breaker_classifier:
   breaker_anomaly: models/dinov2_vits14.safetensors
   breaker_anomaly_calibration:
