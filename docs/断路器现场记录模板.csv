@@ -1,0 +1,2 @@
+record_id,source_path,class,device_family_id,manufacturer,model,site_id,panel_id,asset_id,camera_id,robot_stop_id,capture_session,event_id,captured_at,lighting,view_angle,operator,label_confirmed_by,visual_observability,notes
+R0001,raw/session_001/event_001.mp4,TRIP,DF001,,,SITE01,PANEL01,QF01,CAM01,STOP01,SESSION001,EVENT001,2026-07-23T10:00:00+08:00,normal,front,,,,

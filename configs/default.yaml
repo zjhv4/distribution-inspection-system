@@ -1,0 +1,94 @@
+models:
+  intrusion: models/intrusion_legacy_mixed_yolo11l.pt
+  # 两个人员模型分别对应可见光配电画面和旧 CCTV/热成像画面。
+  intrusion_profiles:
+    power_visible: models/intrusion_power_visible_yolo11l.pt
+    legacy_mixed: models/intrusion_legacy_mixed_yolo11l.pt
+  breaker: models/breaker_open_close_yolo11n.pt
+  breaker_classifier:
+  breaker_anomaly: models/dinov2_vits14.safetensors
+  breaker_anomaly_calibration:
+
+runtime:
+  device: "0"
+  imgsz: 768
+  half: false
+
+intrusion:
+  # 普通可见光配电/变电摄像头使用 power_visible。
+  model_profile: power_visible
+  person_class_names: ["person"]
+  # 置信度阈值由验证集选定。
+  confidence: 0.28
+  iou: 0.45
+  min_consecutive_frames: 3
+  recovery_consecutive_frames: 5
+  footpoint_ratio: 0.92
+  use_model_tracking: true
+  tracker: bytetrack.yaml
+  identity_context_path: runtime/access_identity_context.json
+  identity_context_ttl_seconds: 5
+  zones:
+    - name: restricted_area
+      # 部署时替换为实际围栏坐标。
+      polygon: [[0, 0], [1919, 0], [1919, 1079], [0, 1079]]
+      # 身份信息由人脸或门禁服务提供。
+      access_policy: scheduled_authorized
+      unknown_identity_action: review
+      allowed_identity_ids: []
+      # 部署时替换为现场授权时段。
+      access_windows:
+        - days: [0, 1, 2, 3, 4, 5, 6]
+          start: "07:00"
+          end: "19:00"
+
+breaker:
+  mode: detection_hybrid
+  # OPEN/外观偏离是视觉观测，TRIP/MICRO_TRIP 是时序事件。
+  decision_mode: temporal_evidence
+  confidence: 0.30
+  classifier_confidence: 0.45
+  classifier_imgsz: 224
+  iou: 0.45
+  abnormal_classes: ["TRIP", "MICRO_TRIP"]
+  normal_classes: ["CLOSED", "OPEN"]
+  class_thresholds:
+    TRIP: 0.50
+    MICRO_TRIP: 0.50
+  min_consecutive_frames: 3
+  recovery_consecutive_frames: 2
+  open_classes: ["OPEN"]
+  closed_classes: ["CLOSE", "CLOSED"]
+  deviation_classes: ["OPEN", "ANOMALY", "INTERMEDIATE", "VISUAL_DEVIATION"]
+  anomaly_score_threshold: 0.50
+  anomaly_backend: dinov2_reference
+  anomaly_bootstrap_frames: 100
+  anomaly_bank_size: 300
+  anomaly_sample_stride: 15
+  anomaly_neighbors: 5
+  anomaly_normal_confidence: 0.90
+  anomaly_normal_quantile: 0.995
+  anomaly_min_raw_threshold: 0.02
+  micro_trip_min_frames: 2
+  trip_confirm_frames: 3
+  micro_trip_max_frames: 2
+  max_missing_frames: 1
+  command_metadata_keys: ["commanded_open", "expected_open", "maintenance_mode"]
+  trip_confirmation_keys: ["protection_trip", "trip_coil_active", "auxiliary_trip"]
+  rois:
+    # 部署时替换为 QF1 的实际区域。
+    - name: QF1
+      bbox: [0, 0, 1919, 1079]
+
+alarm:
+  jsonl_path: alarms/rtx_6_20_alerts.jsonl
+  save_snapshots: true
+  snapshot_dir: alarms/rtx_6_20_snapshots
+  webhook_url: http://127.0.0.1:18088/alerts
+  webhook_timeout_seconds: 3
+  webhook_retries: 3
+  outbox_db_path: alarms/rtx_6_20_outbox.sqlite3
+  background_delivery: true
+  retry_base_seconds: 1
+  retry_max_seconds: 60
+  webhook_max_attempts: 20

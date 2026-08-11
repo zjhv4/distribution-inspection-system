@@ -1,0 +1,14 @@
+{
+  "updated_at": "2026-08-03T10:00:00+08:00",
+  "tracks": {
+    "42": {
+      "identity_id": "worker-0007",
+      "authorized": true,
+      "authorized_zones": ["restricted_area"]
+    },
+    "51": {
+      "identity_id": "visitor-0012",
+      "authorized": false
+    }
+  }
+}
