@@ -5,7 +5,6 @@ models:
     power_visible: models/intrusion_power_visible_yolo11l.pt
     legacy_mixed: models/intrusion_legacy_mixed_yolo11l.pt
   breaker: models/breaker_mobile_types_yolo11s.pt
-  breaker_far: models/breaker_mobile_types_far_yolo11s.pt
   breaker_state_classifier: models/breaker_mcb_state_yolo11s_cls.pt
 
 runtime:
@@ -67,14 +66,6 @@ breaker:
   mobile_state_unknown_margin: 0.15
   mobile_confirm_closed_geometry: true
   mobile_closed_confirm_seconds: 0.5
-  # 远景目标过小时自动扫描全画面重叠分块；不依赖固定机位或固定区域。
-  mobile_tiled_detection: true
-  mobile_tiled_trigger_count: 3
-  mobile_tiled_confidence: 0.15
-  mobile_tiled_columns: 4
-  mobile_tiled_rows: 2
-  mobile_tiled_overlap: 0.25
-  mobile_tiled_minimum_row_devices: 5
   # 按现场设备清单设置同帧上限，不限制设备位置。
   mobile_class_limits: {MCB: 10, RCD: 2, ISOLATOR: 1}
   micro_trip_min_frames: 2

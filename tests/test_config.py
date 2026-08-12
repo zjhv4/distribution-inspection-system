@@ -36,7 +36,6 @@ def test_default_breaker_uses_mobile_device_detection() -> None:
     config = load_site_config("configs/default.yaml")
     assert config.breaker.mode == "mobile_detection"
     assert config.models.breaker == "models/breaker_mobile_types_yolo11s.pt"
-    assert config.models.breaker_far == "models/breaker_mobile_types_far_yolo11s.pt"
     assert config.models.breaker_state_classifier == "models/breaker_mcb_state_yolo11s_cls.pt"
     assert config.breaker.mobile_device_classes == ["MCB"]
     assert config.breaker.mobile_class_limits == {"MCB": 10, "RCD": 2, "ISOLATOR": 1}

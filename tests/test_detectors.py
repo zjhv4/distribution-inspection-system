@@ -10,8 +10,6 @@ from edge_inspection.breaker_mobile import (
     classify_mcb_crops,
     classify_mcb_handle_geometry,
     filter_visible_breaker_controls,
-    merge_breaker_detections,
-    select_coherent_breaker_row,
 )
 from edge_inspection.config import AccessWindowConfig, BreakerConfig, IntrusionConfig, ZoneConfig
 from edge_inspection.events import Detection
@@ -170,37 +168,6 @@ def test_mobile_breaker_tracker_ignores_non_mcb_and_keeps_identity() -> None:
     second = tracker.update([Detection((11, 10, 31, 60), 0.9, 0, "MCB")], frame_id=2)
     assert len(first) == 1
     assert first[0].metadata["track_id"] == second[0].metadata["track_id"]
-
-
-def test_mobile_tiled_detections_are_deduplicated() -> None:
-    detections = [
-        Detection((10, 20, 50, 100), 0.80, 0, "MCB"),
-        Detection((12, 19, 51, 101), 0.55, 0, "MCB"),
-        Detection((70, 20, 110, 100), 0.70, 0, "MCB"),
-    ]
-    merged = merge_breaker_detections(detections)
-    assert len(merged) == 2
-    assert merged[0].confidence == 0.80
-
-
-def test_mobile_tiled_detections_remove_cross_class_duplicates() -> None:
-    detections = [
-        Detection((10, 20, 60, 100), 0.75, 0, "MCB"),
-        Detection((11, 20, 61, 100), 0.60, 1, "RCD"),
-    ]
-    assert merge_breaker_detections(detections) == [detections[0]]
-
-
-def test_mobile_tiled_detection_requires_coherent_device_row() -> None:
-    row = [
-        Detection((10, 100, 50, 200), 0.4, 0, "MCB"),
-        Detection((60, 103, 100, 202), 0.5, 0, "MCB"),
-        Detection((110, 98, 150, 199), 0.6, 1, "RCD"),
-        Detection((200, 10, 240, 80), 0.7, 0, "MCB"),
-    ]
-    selected = select_coherent_breaker_row(row, minimum_devices=3)
-    assert [item.bbox[0] for item in selected] == [10, 60, 110]
-    assert select_coherent_breaker_row(row[:2], minimum_devices=3) == []
 
 
 def test_mobile_detection_waits_until_operating_area_is_visible() -> None:

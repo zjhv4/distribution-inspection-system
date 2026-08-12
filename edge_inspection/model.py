@@ -47,62 +47,6 @@ class YoloDetector:
             return []
         return self._result_to_detections(results[0])
 
-    def predict_tiled(
-        self,
-        frame: Any,
-        *,
-        conf: float,
-        iou: float,
-        columns: int,
-        rows: int,
-        overlap: float,
-    ) -> list[Detection]:
-        """Detect small objects by scanning overlapping tiles across the whole frame."""
-        if columns < 1 or rows < 1:
-            raise ValueError("Tile columns and rows must be positive.")
-        if not 0 <= overlap < 1:
-            raise ValueError("Tile overlap must be in [0, 1).")
-
-        height, width = frame.shape[:2]
-        tile_width = min(width, max(1, int(width / (columns - (columns - 1) * overlap))))
-        tile_height = min(height, max(1, int(height / (rows - (rows - 1) * overlap))))
-        step_x = max(1, int(tile_width * (1 - overlap)))
-        step_y = max(1, int(tile_height * (1 - overlap)))
-        x_offsets = [min(index * step_x, width - tile_width) for index in range(columns)]
-        y_offsets = [min(index * step_y, height - tile_height) for index in range(rows)]
-        offsets = [(x, y) for y in y_offsets for x in x_offsets]
-        tiles = [frame[y : y + tile_height, x : x + tile_width] for x, y in offsets]
-
-        predict_args = {
-            "conf": conf,
-            "iou": iou,
-            "imgsz": self.imgsz,
-            "device": self.device,
-            "verbose": False,
-        }
-        if self.half:
-            predict_args["half"] = True
-        results = self.model.predict(tiles, **predict_args)
-        detections: list[Detection] = []
-        for (offset_x, offset_y), result in zip(offsets, results, strict=True):
-            for detection in self._result_to_detections(result):
-                x1, y1, x2, y2 = detection.bbox
-                detections.append(
-                    Detection(
-                        bbox=(
-                            x1 + offset_x,
-                            y1 + offset_y,
-                            x2 + offset_x,
-                            y2 + offset_y,
-                        ),
-                        confidence=detection.confidence,
-                        class_id=detection.class_id,
-                        class_name=detection.class_name,
-                        metadata={**detection.metadata, "detection_source": "tiled"},
-                    )
-                )
-        return detections
-
     @staticmethod
     def _result_to_detections(result: Any) -> list[Detection]:
         names = result.names or {}

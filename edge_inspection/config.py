@@ -15,7 +15,6 @@ class ModelsConfig:
     intrusion: str = "yolo11n.pt"
     intrusion_profiles: dict[str, str] = field(default_factory=dict)
     breaker: str | None = None
-    breaker_far: str | None = None
     breaker_state_classifier: str | None = None
 
 
@@ -104,13 +103,6 @@ class BreakerConfig:
     mobile_confirm_closed_geometry: bool = True
     mobile_closed_confirm_seconds: float = 0.5
     mobile_class_limits: dict[str, int] = field(default_factory=dict)
-    mobile_tiled_detection: bool = True
-    mobile_tiled_trigger_count: int = 3
-    mobile_tiled_confidence: float = 0.15
-    mobile_tiled_columns: int = 4
-    mobile_tiled_rows: int = 2
-    mobile_tiled_overlap: float = 0.25
-    mobile_tiled_minimum_row_devices: int = 5
     command_metadata_keys: list[str] = field(
         default_factory=lambda: ["commanded_open", "expected_open", "maintenance_mode"]
     )
@@ -213,27 +205,10 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
             raise ValueError("breaker.mobile_class_limits values must be non-negative")
     if breaker_raw.get("mobile_device_classes", ["MCB"]) != ["MCB"]:
         raise ValueError("breaker.mobile_device_classes must contain only MCB")
-    for key in (
-        "confidence",
-        "mobile_state_confidence",
-        "mobile_state_unknown_margin",
-        "mobile_tiled_confidence",
-    ):
+    for key in ("confidence", "mobile_state_confidence", "mobile_state_unknown_margin"):
         value = float(breaker_raw.get(key, getattr(BreakerConfig(), key)))
         if not 0 <= value <= 1:
             raise ValueError(f"breaker.{key} must be in [0, 1]")
-    for key in ("mobile_tiled_columns", "mobile_tiled_rows", "mobile_tiled_minimum_row_devices"):
-        if int(breaker_raw.get(key, getattr(BreakerConfig(), key))) < 1:
-            raise ValueError(f"breaker.{key} must be positive")
-    if int(
-        breaker_raw.get("mobile_tiled_trigger_count", BreakerConfig().mobile_tiled_trigger_count)
-    ) < 0:
-        raise ValueError("breaker.mobile_tiled_trigger_count must be non-negative")
-    tiled_overlap = float(
-        breaker_raw.get("mobile_tiled_overlap", BreakerConfig().mobile_tiled_overlap)
-    )
-    if not 0 <= tiled_overlap < 1:
-        raise ValueError("breaker.mobile_tiled_overlap must be in [0, 1)")
     if float(
         breaker_raw.get("mobile_tracker_iou_threshold", BreakerConfig().mobile_tracker_iou_threshold)
     ) <= 0:

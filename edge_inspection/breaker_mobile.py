@@ -5,46 +5,6 @@ from dataclasses import dataclass
 from .events import Detection
 
 
-def merge_breaker_detections(
-    detections: list[Detection],
-    *,
-    iou_threshold: float = 0.35,
-) -> list[Detection]:
-    """Remove duplicate full-frame/tiled boxes, keeping the strongest observation."""
-    kept: list[Detection] = []
-    for detection in sorted(detections, key=lambda item: item.confidence, reverse=True):
-        if all(bbox_iou(detection.bbox, other.bbox) < iou_threshold for other in kept):
-            kept.append(detection)
-    return kept
-
-
-def select_coherent_breaker_row(
-    detections: list[Detection],
-    *,
-    minimum_devices: int = 3,
-    center_tolerance_ratio: float = 0.45,
-) -> list[Detection]:
-    """Reject isolated low-confidence tile hits unless they form a physical device row."""
-    if len(detections) < minimum_devices:
-        return []
-    heights = sorted(max(1.0, item.bbox[3] - item.bbox[1]) for item in detections)
-    median_height = heights[len(heights) // 2]
-    best_group: list[Detection] = []
-    for seed in detections:
-        seed_center = (seed.bbox[1] + seed.bbox[3]) / 2
-        group = [
-            item
-            for item in detections
-            if abs((item.bbox[1] + item.bbox[3]) / 2 - seed_center)
-            <= center_tolerance_ratio * median_height
-        ]
-        if len(group) > len(best_group):
-            best_group = group
-    if len(best_group) < minimum_devices:
-        return []
-    return sorted(best_group, key=lambda item: item.bbox[0])
-
-
 def filter_visible_breaker_controls(frame, detections: list[Detection]) -> list[Detection]:
     """Drop detections whose operating area is still hidden by a cover or panel edge."""
     import cv2
