@@ -13,8 +13,6 @@ REQUIRED_MODULES = [
     "yaml",
     "requests",
     "lap",
-    "timm",
-    "safetensors",
 ]
 
 

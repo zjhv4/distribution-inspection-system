@@ -15,9 +15,7 @@ class ModelsConfig:
     intrusion: str = "yolo11n.pt"
     intrusion_profiles: dict[str, str] = field(default_factory=dict)
     breaker: str | None = None
-    breaker_classifier: str | None = None
-    breaker_anomaly: str | None = None
-    breaker_anomaly_calibration: str | None = None
+    breaker_state_classifier: str | None = None
 
 
 @dataclass
@@ -66,19 +64,10 @@ class IntrusionConfig:
 
 
 @dataclass
-class BreakerRoiConfig:
-    name: str
-    bbox: tuple[float, float, float, float]
-    closed_reference: str | None = None
-    open_reference: str | None = None
-
-
-@dataclass
 class BreakerConfig:
-    mode: str = "detection"
-    decision_mode: str = "direct_classes"
+    mode: str = "mobile_detection"
+    decision_mode: str = "temporal_evidence"
     confidence: float = 0.50
-    classifier_confidence: float = 0.50
     classifier_imgsz: int = 224
     iou: float = 0.45
     abnormal_classes: list[str] = field(default_factory=lambda: ["TRIP", "MICRO_TRIP"])
@@ -90,18 +79,7 @@ class BreakerConfig:
     recovery_consecutive_frames: int = 2
     open_classes: list[str] = field(default_factory=lambda: ["OPEN"])
     closed_classes: list[str] = field(default_factory=lambda: ["CLOSE", "CLOSED"])
-    deviation_classes: list[str] = field(
-        default_factory=lambda: ["OPEN", "ANOMALY", "INTERMEDIATE", "VISUAL_DEVIATION"]
-    )
-    anomaly_score_threshold: float = 0.50
-    anomaly_backend: str = "reconstruction"
-    anomaly_bootstrap_frames: int = 100
-    anomaly_bank_size: int = 300
-    anomaly_sample_stride: int = 15
-    anomaly_neighbors: int = 5
-    anomaly_normal_confidence: float = 0.90
-    anomaly_normal_quantile: float = 0.995
-    anomaly_min_raw_threshold: float = 0.02
+    deviation_classes: list[str] = field(default_factory=lambda: ["OPEN"])
     micro_trip_min_frames: int = 2
     trip_confirm_frames: int = 5
     micro_trip_max_frames: int = 4
@@ -115,22 +93,22 @@ class BreakerConfig:
     recovery_seconds: float = 0.0
     max_observation_gap_seconds: float = 0.0
     rearm_after_event: bool = False
-    reference_similarity: float = 0.65
-    reference_margin: float = 0.05
-    reference_search_pixels: int = 5
-    reference_x1_ratio: float = 0.08
-    reference_x2_ratio: float = 0.92
-    reference_y1_ratio: float = 0.42
-    reference_y2_ratio: float = 0.98
-    reference_width: int = 64
-    reference_height: int = 64
+    mobile_device_classes: list[str] = field(default_factory=lambda: ["MCB"])
+    mobile_tracker_iou_threshold: float = 0.25
+    mobile_tracker_max_missing_frames: int = 15
+    mobile_tracker: str = "bytetrack.yaml"
+    handle_up_means_closed: bool = True
+    mobile_state_confidence: float = 0.75
+    mobile_state_unknown_margin: float = 0.15
+    mobile_confirm_closed_geometry: bool = True
+    mobile_closed_confirm_seconds: float = 0.5
+    mobile_class_limits: dict[str, int] = field(default_factory=dict)
     command_metadata_keys: list[str] = field(
         default_factory=lambda: ["commanded_open", "expected_open", "maintenance_mode"]
     )
     trip_confirmation_keys: list[str] = field(
         default_factory=lambda: ["protection_trip", "trip_coil_active", "auxiliary_trip"]
     )
-    rois: list[BreakerRoiConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -210,6 +188,7 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
         "open_classes",
         "closed_classes",
         "deviation_classes",
+        "mobile_device_classes",
     ):
         if key in breaker_raw:
             breaker_raw[key] = [str(value).upper() for value in breaker_raw[key]]
@@ -217,6 +196,35 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
         breaker_raw["class_thresholds"] = {
             str(key).upper(): float(value) for key, value in breaker_raw["class_thresholds"].items()
         }
+    if "mobile_class_limits" in breaker_raw:
+        breaker_raw["mobile_class_limits"] = {
+            str(key).upper(): int(value)
+            for key, value in breaker_raw["mobile_class_limits"].items()
+        }
+        if any(value < 0 for value in breaker_raw["mobile_class_limits"].values()):
+            raise ValueError("breaker.mobile_class_limits values must be non-negative")
+    if breaker_raw.get("mobile_device_classes", ["MCB"]) != ["MCB"]:
+        raise ValueError("breaker.mobile_device_classes must contain only MCB")
+    for key in ("confidence", "mobile_state_confidence", "mobile_state_unknown_margin"):
+        value = float(breaker_raw.get(key, getattr(BreakerConfig(), key)))
+        if not 0 <= value <= 1:
+            raise ValueError(f"breaker.{key} must be in [0, 1]")
+    if float(
+        breaker_raw.get("mobile_tracker_iou_threshold", BreakerConfig().mobile_tracker_iou_threshold)
+    ) <= 0:
+        raise ValueError("breaker.mobile_tracker_iou_threshold must be positive")
+    if int(
+        breaker_raw.get(
+            "mobile_tracker_max_missing_frames", BreakerConfig().mobile_tracker_max_missing_frames
+        )
+    ) < 0:
+        raise ValueError("breaker.mobile_tracker_max_missing_frames must be non-negative")
+    if float(
+        breaker_raw.get(
+            "mobile_closed_confirm_seconds", BreakerConfig().mobile_closed_confirm_seconds
+        )
+    ) <= 0:
+        raise ValueError("breaker.mobile_closed_confirm_seconds must be positive")
     decision_mode = breaker_raw.get("decision_mode", "direct_classes")
     if decision_mode in {"temporal_open", "temporal_evidence"}:
         trip_frames = int(breaker_raw.get("trip_confirm_frames", 5))
@@ -228,16 +236,6 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
             raise ValueError("breaker.micro_trip_min_frames must be in [1, micro_trip_max_frames]")
         if micro_frames >= trip_frames:
             raise ValueError("breaker.micro_trip_max_frames must be less than trip_confirm_frames")
-        anomaly_threshold = float(breaker_raw.get("anomaly_score_threshold", 0.50))
-        if not 0 <= anomaly_threshold <= 1:
-            raise ValueError("breaker.anomaly_score_threshold must be in [0, 1]")
-        anomaly_backend = str(breaker_raw.get("anomaly_backend", "reconstruction"))
-        if anomaly_backend not in {"reconstruction", "dinov2_reference"}:
-            raise ValueError("breaker.anomaly_backend must be reconstruction or dinov2_reference")
-        if int(breaker_raw.get("anomaly_bootstrap_frames", 100)) < 2:
-            raise ValueError("breaker.anomaly_bootstrap_frames must be at least 2")
-        if int(breaker_raw.get("anomaly_neighbors", 5)) < 1:
-            raise ValueError("breaker.anomaly_neighbors must be positive")
         observation_confidence = float(breaker_raw.get("observation_confidence", 0.0))
         if not 0 <= observation_confidence <= 1:
             raise ValueError("breaker.observation_confidence must be in [0, 1]")
@@ -262,46 +260,15 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
                 raise ValueError("breaker.recovery_seconds must be positive")
             if gap_seconds <= 0:
                 raise ValueError("breaker.max_observation_gap_seconds must be positive")
-    breaker_rois = []
-    for item in breaker_raw.pop("rois", []):
-        roi_raw = dict(item)
-        roi_raw["bbox"] = tuple(float(value) for value in roi_raw["bbox"])
-        breaker_rois.append(BreakerRoiConfig(**roi_raw))
-    breaker_mode = str(breaker_raw.get("mode", "detection"))
-    if breaker_mode == "roi_reference":
-        if not breaker_rois:
-            raise ValueError("breaker.mode=roi_reference requires at least one ROI")
-        missing_references = [
-            roi.name
-            for roi in breaker_rois
-            if not roi.closed_reference or not roi.open_reference
-        ]
-        if missing_references:
-            raise ValueError(
-                "breaker.mode=roi_reference requires CLOSED and OPEN references for: "
-                + ", ".join(missing_references)
-            )
-        similarity = float(breaker_raw.get("reference_similarity", 0.65))
-        margin = float(breaker_raw.get("reference_margin", 0.05))
-        if not 0 <= similarity <= 1:
-            raise ValueError("breaker.reference_similarity must be in [0, 1]")
-        if not 0 <= margin <= 1:
-            raise ValueError("breaker.reference_margin must be in [0, 1]")
-        defaults = BreakerConfig()
-        for start_key, end_key in (
-            ("reference_x1_ratio", "reference_x2_ratio"),
-            ("reference_y1_ratio", "reference_y2_ratio"),
-        ):
-            start = float(breaker_raw.get(start_key, getattr(defaults, start_key)))
-            end = float(breaker_raw.get(end_key, getattr(defaults, end_key)))
-            if not 0 <= start < end <= 1:
-                raise ValueError(f"breaker.{start_key}/{end_key} must define a region in [0, 1]")
+    breaker_mode = str(breaker_raw.get("mode", "mobile_detection"))
+    if breaker_mode != "mobile_detection":
+        raise ValueError("breaker.mode must be mobile_detection")
 
     return SiteConfig(
         models=ModelsConfig(**raw.get("models", {})),
         runtime=RuntimeConfig(**raw.get("runtime", {})),
         intrusion=IntrusionConfig(**intrusion_raw),
-        breaker=BreakerConfig(**breaker_raw, rois=breaker_rois),
+        breaker=BreakerConfig(**breaker_raw),
         alarm=AlarmConfig(**alarm_raw),
     )
 

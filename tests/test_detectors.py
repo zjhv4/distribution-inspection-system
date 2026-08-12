@@ -1,28 +1,18 @@
-from edge_inspection.breaker import BreakerStateDetector
-from edge_inspection.breaker_reference import BreakerReferenceClassifier
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from edge_inspection.config import AccessWindowConfig, BreakerConfig, BreakerRoiConfig, IntrusionConfig, ModelsConfig, RuntimeConfig, SiteConfig, ZoneConfig
-from edge_inspection.events import Detection
-from edge_inspection.intrusion import IntrusionDetector
-from edge_inspection.pipeline import (
-    assign_breaker_assets,
-    classify_breaker_reference_rois,
-    classify_breaker_rois,
-    score_breaker_detection_crops,
-)
-
 import numpy as np
 
-from edge_inspection.anomaly import normalize_torch_device
-
-
-def test_numeric_runtime_device_is_normalized_for_torch() -> None:
-    assert normalize_torch_device("0") == "cuda:0"
-    assert normalize_torch_device("1") == "cuda:1"
-    assert normalize_torch_device("cpu") == "cpu"
-    assert normalize_torch_device("cuda:0") == "cuda:0"
+from edge_inspection.breaker import BreakerStateDetector
+from edge_inspection.breaker_mobile import (
+    MobileBreakerTracker,
+    MobileMcbStateGate,
+    classify_mcb_crops,
+    classify_mcb_handle_geometry,
+)
+from edge_inspection.config import AccessWindowConfig, BreakerConfig, IntrusionConfig, ZoneConfig
+from edge_inspection.events import Detection
+from edge_inspection.intrusion import IntrusionDetector
 
 
 def test_intrusion_requires_consecutive_frames() -> None:
@@ -169,149 +159,151 @@ def test_intrusion_reads_fresh_identity_context(tmp_path) -> None:
     assert detector.update([person], frame_id=1, observed_at=observed_at) == []
 
 
-def test_breaker_alerts_only_abnormal_classes() -> None:
-    detector = BreakerStateDetector(BreakerConfig(min_consecutive_frames=1))
-    normal = Detection(bbox=(0, 0, 10, 10), confidence=0.9, class_id=0, class_name="closed")
-    abnormal = Detection(bbox=(0, 0, 10, 10), confidence=0.95, class_id=2, class_name="trip")
-
-    assert detector.update([normal], frame_id=1) == []
-    events = detector.update([abnormal], frame_id=2)
-    assert len(events) == 1
-    assert events[0].alert_type == "TRIP"
-    assert detector.update([abnormal], frame_id=3) == []
-    assert detector.update([], frame_id=4) == []
-    recovered = detector.update([], frame_id=5)
-    assert recovered[0].phase == "RECOVERED"
-    assert recovered[0].event_id == events[0].event_id
+def test_mobile_breaker_tracker_ignores_non_mcb_and_keeps_identity() -> None:
+    tracker = MobileBreakerTracker(iou_threshold=0.2, max_missing_frames=2)
+    mcb = Detection((10, 10, 30, 60), 0.9, 0, "MCB")
+    isolator = Detection((40, 10, 80, 60), 0.9, 2, "ISOLATOR")
+    first = tracker.update([mcb, isolator], frame_id=1)
+    second = tracker.update([Detection((11, 10, 31, 60), 0.9, 0, "MCB")], frame_id=2)
+    assert len(first) == 1
+    assert first[0].metadata["track_id"] == second[0].metadata["track_id"]
 
 
-def test_breaker_roi_classifier_detection_metadata() -> None:
+def test_mobile_handle_geometry_marks_down_handle_open() -> None:
+    import cv2
+
+    frame = np.full((140, 80, 3), 230, dtype=np.uint8)
+    cv2.rectangle(frame, (28, 72), (52, 128), (20, 20, 20), -1)
+    cv2.rectangle(frame, (18, 110), (62, 130), (35, 35, 35), -1)
+    detection = Detection((10, 10, 70, 135), 0.95, 0, "MCB", {"track_id": "MCB-1"})
+    result = classify_mcb_handle_geometry(frame, [detection], handle_up_means_closed=True)
+    assert result[0].class_name == "OPEN"
+    assert result[0].metadata["device_class"] == "MCB"
+    assert result[0].metadata["track_id"] == "MCB-1"
+
+
+def test_mobile_handle_geometry_marks_up_handle_closed() -> None:
+    import cv2
+
+    frame = np.full((140, 80, 3), 230, dtype=np.uint8)
+    cv2.rectangle(frame, (18, 48), (62, 68), (25, 25, 25), -1)
+    cv2.rectangle(frame, (28, 48), (52, 92), (20, 20, 20), -1)
+    detection = Detection((10, 10, 70, 135), 0.95, 0, "MCB", {"track_id": "MCB-1"})
+    result = classify_mcb_handle_geometry(frame, [detection], handle_up_means_closed=True)
+    assert result[0].class_name == "CLOSED"
+
+
+def test_mobile_handle_geometry_returns_unknown_when_hand_occludes_device() -> None:
+    frame = np.full((140, 80, 3), (105, 145, 195), dtype=np.uint8)
+    detection = Detection((10, 10, 70, 135), 0.95, 0, "MCB", {"track_id": "MCB-1"})
+    result = classify_mcb_handle_geometry(frame, [detection])
+    assert result[0].class_name == "UNKNOWN"
+    assert result[0].metadata["observation_valid"] is False
+
+
+def test_mobile_tracker_replaces_identity_after_long_absence() -> None:
+    tracker = MobileBreakerTracker(iou_threshold=0.2, max_missing_frames=2)
+    first = tracker.update([Detection((10, 10, 30, 60), 0.9, 0, "MCB")], frame_id=1)
+    tracker.update([], frame_id=2)
+    tracker.update([], frame_id=4)
+    returned = tracker.update([Detection((10, 10, 30, 60), 0.9, 0, "MCB")], frame_id=5)
+    assert first[0].metadata["track_id"] != returned[0].metadata["track_id"]
+
+
+def test_mobile_tracker_uses_model_track_id_when_available() -> None:
+    tracker = MobileBreakerTracker(iou_threshold=0.2, max_missing_frames=2)
+    detection = Detection((10, 10, 30, 60), 0.9, 0, "MCB", {"track_id": 17})
+    result = tracker.update([detection], frame_id=1)
+    assert result[0].metadata["track_id"] == "MCB-17"
+    assert result[0].metadata["asset_id"] == "MCB-17"
+
+
+def test_mobile_tracker_does_not_replace_model_identity_with_iou_match() -> None:
+    tracker = MobileBreakerTracker(iou_threshold=0.2, max_missing_frames=2)
+    tracker.update([Detection((10, 10, 30, 60), 0.9, 0, "MCB", {"track_id": 17})], frame_id=1)
+    moved = tracker.update(
+        [Detection((11, 10, 31, 60), 0.9, 0, "MCB", {"track_id": 23})],
+        frame_id=2,
+    )
+    assert moved[0].metadata["track_id"] == "MCB-23"
+
+
+def test_mobile_state_classifier_rejects_uncertain_prediction() -> None:
     class FakeClassifier:
-        def predict(self, frame):
-            assert frame.shape[:2] == (20, 20)
+        def predict(self, crop):
             return Detection(
-                bbox=(0, 0, 20, 20),
-                confidence=0.70,
-                class_id=1,
-                class_name="OPEN",
-                metadata={"class_probabilities": {"OPEN": 0.70, "TRIP": 0.25, "MICRO_TRIP": 0.05}},
+                (0, 0, 10, 10),
+                0.55,
+                0,
+                "OPEN",
+                {"class_probabilities": {"OPEN": 0.55, "CLOSED": 0.45}},
             )
 
-    config = SiteConfig(
-        models=ModelsConfig(),
-        runtime=RuntimeConfig(),
-        intrusion=IntrusionConfig(zones=[]),
-        breaker=BreakerConfig(
-            mode="roi_classification",
-            classifier_confidence=0.5,
-            abnormal_classes=["TRIP"],
-            class_thresholds={"TRIP": 0.2},
-            min_consecutive_frames=1,
-            rois=[BreakerRoiConfig(name="QF1", bbox=(10, 10, 30, 30))],
-        ),
+    frame = np.full((100, 60, 3), 220, dtype=np.uint8)
+    device = Detection((0, 0, 60, 100), 0.9, 0, "MCB", {"track_id": "MCB-1"})
+    result = classify_mcb_crops(
+        frame,
+        [device],
+        FakeClassifier(),
+        confidence_threshold=0.75,
+        unknown_margin=0.15,
     )
-    frame = np.zeros((50, 50, 3), dtype=np.uint8)
-
-    detections = classify_breaker_rois(frame, FakeClassifier(), config)
-    assert detections == [
-        Detection(
-            bbox=(10.0, 10.0, 30.0, 30.0),
-            confidence=0.25,
-            class_id=1,
-            class_name="TRIP",
-            metadata={
-                "roi_name": "QF1",
-                "class_probabilities": {"OPEN": 0.70, "TRIP": 0.25, "MICRO_TRIP": 0.05},
-            },
-        )
-    ]
-
-    events = BreakerStateDetector(config.breaker).update(detections, frame_id=1)
-    assert events[0].metadata["roi_name"] == "QF1"
+    assert result[0].class_name == "UNKNOWN"
+    assert result[0].metadata["observation_valid"] is False
 
 
-def test_breaker_reference_classifier_matches_known_handle_position(tmp_path) -> None:
-    reference = np.full((100, 50, 3), 230, dtype=np.uint8)
-    reference[50:92, 14:36] = 20
-    reference[72:92, 8:42] = 35
-    path = tmp_path / "qf1_open.png"
+def test_mobile_state_classifier_rejects_closed_without_geometry_confirmation() -> None:
     import cv2
 
-    assert cv2.imwrite(str(path), reference)
-    config = BreakerConfig(
-        mode="roi_reference",
-        reference_similarity=0.8,
-        rois=[
-            BreakerRoiConfig(
-                name="QF1",
-                bbox=(0, 0, 50, 100),
-                open_reference=str(path),
+    class FakeClassifier:
+        def predict(self, crop):
+            return Detection(
+                (0, 0, 10, 10),
+                0.99,
+                0,
+                "CLOSED",
+                {"class_probabilities": {"OPEN": 0.01, "CLOSED": 0.99}},
             )
-        ],
+
+    frame = np.full((140, 80, 3), 230, dtype=np.uint8)
+    cv2.rectangle(frame, (28, 72), (52, 128), (20, 20, 20), -1)
+    cv2.rectangle(frame, (18, 110), (62, 130), (35, 35, 35), -1)
+    device = Detection((10, 10, 70, 135), 0.9, 0, "MCB", {"track_id": "MCB-1"})
+    result = classify_mcb_crops(
+        frame,
+        [device],
+        FakeClassifier(),
+        confidence_threshold=0.75,
+        unknown_margin=0.15,
     )
-    classifier = BreakerReferenceClassifier(config)
-    detections = classify_breaker_reference_rois(reference.copy(), classifier, SiteConfig(
-        models=ModelsConfig(),
-        runtime=RuntimeConfig(),
-        intrusion=IntrusionConfig(zones=[]),
-        breaker=config,
-    ))
-    assert len(detections) == 1
-    assert detections[0].class_name == "OPEN"
-    assert detections[0].metadata["observation_valid"] is True
-    assert detections[0].metadata["decision_basis"] == "site_reference_geometry"
+    assert result[0].class_name == "UNKNOWN"
+    assert result[0].metadata["closed_geometry_confirmation"] == "OPEN"
 
 
-def test_breaker_reference_classifier_returns_unknown_for_occlusion(tmp_path) -> None:
-    import cv2
-
-    reference = np.full((100, 50, 3), 230, dtype=np.uint8)
-    reference[50:92, 14:36] = 20
-    path = tmp_path / "qf1_open.png"
-    assert cv2.imwrite(str(path), reference)
-    config = BreakerConfig(
-        mode="roi_reference",
-        reference_similarity=0.8,
-        rois=[BreakerRoiConfig("QF1", (0, 0, 50, 100), open_reference=str(path))],
+def test_mobile_state_gate_rejects_short_closed_flicker() -> None:
+    gate = MobileMcbStateGate(closed_confirm_seconds=0.5, max_missing_frames=2)
+    closed = Detection(
+        (0, 0, 20, 80),
+        0.95,
+        0,
+        "CLOSED",
+        {"asset_id": "MCB-7", "observation_valid": True},
     )
-    result = BreakerReferenceClassifier(config).predict(
-        np.zeros_like(reference),
-        asset_id="QF1",
-    )
-    assert result.class_name == "UNKNOWN"
-    assert result.metadata["observation_valid"] is False
+    assert gate.update([closed], frame_id=1, observed_at_seconds=1.0)[0].class_name == "UNKNOWN"
+    assert gate.update([closed], frame_id=2, observed_at_seconds=1.3)[0].class_name == "UNKNOWN"
+    accepted = gate.update([closed], frame_id=3, observed_at_seconds=1.5)[0]
+    assert accepted.class_name == "CLOSED"
+    opened = Detection((0, 0, 20, 80), 0.95, 1, "OPEN", {"asset_id": "MCB-7"})
+    assert gate.update([opened], frame_id=4, observed_at_seconds=1.6)[0].class_name == "OPEN"
+    assert gate.update([closed], frame_id=5, observed_at_seconds=1.7)[0].class_name == "UNKNOWN"
 
 
-def test_breaker_reference_classifier_distinguishes_two_handle_positions(tmp_path) -> None:
-    import cv2
-
-    closed = np.full((100, 50, 3), 230, dtype=np.uint8)
-    closed[44:66, 12:38] = 20
-    closed[44:56, 7:43] = 35
-    opened = np.full((100, 50, 3), 230, dtype=np.uint8)
-    opened[62:92, 14:36] = 20
-    opened[78:92, 8:42] = 35
-    closed_path = tmp_path / "closed.png"
-    open_path = tmp_path / "open.png"
-    assert cv2.imwrite(str(closed_path), closed)
-    assert cv2.imwrite(str(open_path), opened)
-    config = BreakerConfig(
-        mode="roi_reference",
-        reference_similarity=0.7,
-        reference_margin=0.05,
-        reference_search_pixels=2,
-        rois=[
-            BreakerRoiConfig(
-                "QF1",
-                (0, 0, 50, 100),
-                closed_reference=str(closed_path),
-                open_reference=str(open_path),
-            )
-        ],
-    )
-    classifier = BreakerReferenceClassifier(config)
-    assert classifier.predict(closed, asset_id="QF1").class_name == "CLOSED"
-    assert classifier.predict(opened, asset_id="QF1").class_name == "OPEN"
+def test_mobile_handle_geometry_returns_unknown_when_crop_has_no_handle() -> None:
+    frame = np.full((120, 60, 3), 230, dtype=np.uint8)
+    detection = Detection((0, 0, 60, 120), 0.95, 0, "MCB", {"track_id": "MCB-1"})
+    result = classify_mcb_handle_geometry(frame, [detection])
+    assert result[0].class_name == "UNKNOWN"
+    assert result[0].metadata["observation_valid"] is False
 
 
 def test_temporal_open_short_pulse_becomes_micro_trip() -> None:
@@ -378,7 +370,7 @@ def test_temporal_open_does_not_accumulate_across_long_detection_gap() -> None:
     assert len(started) == 1 and started[0].alert_type == "TRIP"
 
 
-def test_temporal_evidence_uses_anomaly_score_for_suspected_micro_trip() -> None:
+def test_temporal_evidence_ignores_unknown_state() -> None:
     detector = BreakerStateDetector(
         BreakerConfig(
             decision_mode="temporal_evidence",
@@ -388,39 +380,10 @@ def test_temporal_evidence_uses_anomaly_score_for_suspected_micro_trip() -> None
             recovery_consecutive_frames=2,
         )
     )
-    deviation = Detection(
-        (0, 0, 10, 10),
-        0.8,
-        0,
-        "CLOSE",
-        {"roi_name": "QF1", "anomaly_score": 0.9},
-    )
+    unknown = Detection((0, 0, 10, 10), 0.0, -1, "UNKNOWN", {"roi_name": "QF1"})
     closed = Detection((0, 0, 10, 10), 0.95, 0, "CLOSE", {"roi_name": "QF1"})
 
-    assert detector.update([deviation], frame_id=1) == []
-    assert detector.update([deviation], frame_id=2) == []
-    assert detector.update([closed], frame_id=3) == []
-    events = detector.update([closed], frame_id=4)
-    assert [event.phase for event in events] == ["START", "RECOVERED"]
-    assert events[0].alert_type == "MICRO_TRIP"
-    assert events[0].metadata["verification_status"] == "SUSPECTED_VISUAL_ONLY"
-    assert "visual:anomaly_score" in events[0].metadata["evidence_sources"]
-
-
-def test_temporal_evidence_ignores_single_frame_visual_noise() -> None:
-    detector = BreakerStateDetector(
-        BreakerConfig(
-            decision_mode="temporal_evidence",
-            trip_confirm_frames=4,
-            micro_trip_min_frames=2,
-            micro_trip_max_frames=3,
-            recovery_consecutive_frames=2,
-        )
-    )
-    anomaly = Detection((0, 0, 10, 10), 0.8, 2, "ANOMALY", {"roi_name": "QF1"})
-    closed = Detection((0, 0, 10, 10), 0.95, 0, "CLOSE", {"roi_name": "QF1"})
-
-    assert detector.update([anomaly], frame_id=1) == []
+    assert detector.update([unknown], frame_id=1) == []
     assert detector.update([closed], frame_id=2) == []
     assert detector.update([closed], frame_id=3) == []
 
@@ -617,54 +580,3 @@ def test_temporal_seconds_resets_after_timestamp_gap() -> None:
     assert detector.update([opened], frame_id=5, observed_at_seconds=2.2) == []
     assert detector.update([closed], frame_id=6, observed_at_seconds=2.4) == []
     assert detector.update([closed], frame_id=7, observed_at_seconds=2.9) == []
-
-
-def test_assign_breaker_assets_uses_configured_roi() -> None:
-    config = SiteConfig(
-        models=ModelsConfig(),
-        runtime=RuntimeConfig(),
-        intrusion=IntrusionConfig(zones=[]),
-        breaker=BreakerConfig(rois=[BreakerRoiConfig(name="QF1", bbox=(0, 0, 50, 50))]),
-    )
-    inside = Detection((10, 10, 20, 20), 0.9, 1, "OPEN")
-    outside = Detection((60, 60, 70, 70), 0.9, 1, "OPEN")
-    assigned = assign_breaker_assets([inside, outside], config)
-    assert len(assigned) == 1
-    assert assigned[0].metadata == {"roi_name": "QF1", "asset_id": "QF1"}
-
-
-def test_detection_hybrid_scores_detected_crop_and_gates_calibration() -> None:
-    class FakeAnomalyScorer:
-        def score(self, crop, *, asset_id, allow_calibration):
-            assert crop.shape[:2] == (20, 20)
-            assert asset_id == "QF1"
-            assert allow_calibration is True
-            return {"anomaly_score": 0.2, "anomaly_calibration_ready": True}
-
-    config = SiteConfig(
-        models=ModelsConfig(),
-        runtime=RuntimeConfig(),
-        intrusion=IntrusionConfig(zones=[]),
-        breaker=BreakerConfig(
-            mode="detection_hybrid",
-            closed_classes=["CLOSE", "CLOSED"],
-            anomaly_normal_confidence=0.9,
-        ),
-    )
-    frame = np.zeros((50, 50, 3), dtype=np.uint8)
-    detection = Detection(
-        (10, 10, 30, 30),
-        0.95,
-        0,
-        "CLOSE",
-        {"asset_id": "QF1"},
-    )
-
-    scored = score_breaker_detection_crops(
-        frame,
-        [detection],
-        FakeAnomalyScorer(),
-        config,
-    )
-    assert scored[0].metadata["anomaly_score"] == 0.2
-    assert scored[0].metadata["anomaly_calibration_ready"] is True

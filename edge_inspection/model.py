@@ -86,30 +86,37 @@ class YoloClassifier:
         self.half = half
 
     def predict(self, frame: Any) -> Detection:
+        return self.predict_many([frame])[0]
+
+    def predict_many(self, frames: list[Any]) -> list[Detection]:
+        if not frames:
+            return []
         predict_args = {"imgsz": self.imgsz, "device": self.device, "verbose": False}
         if self.half:
             predict_args["half"] = True
-        results = self.model.predict(frame, **predict_args)
+        results = self.model.predict(frames, **predict_args)
         if not results:
             raise RuntimeError("Classifier returned no results.")
-
-        result = results[0]
-        if result.probs is None:
-            raise RuntimeError("Classifier result has no probabilities.")
-
-        class_id = int(result.probs.top1)
-        confidence = float(result.probs.top1conf.detach().cpu().item())
-        names = result.names or {}
-        probability_values = result.probs.data.detach().cpu().tolist()
-        class_probabilities = {
-            str(names.get(index, index)).upper(): float(probability)
-            for index, probability in enumerate(probability_values)
-        }
-        height, width = frame.shape[:2]
-        return Detection(
-            bbox=(0.0, 0.0, float(width), float(height)),
-            confidence=confidence,
-            class_id=class_id,
-            class_name=str(names.get(class_id, class_id)).upper(),
-            metadata={"class_probabilities": class_probabilities},
-        )
+        detections: list[Detection] = []
+        for frame, result in zip(frames, results, strict=True):
+            if result.probs is None:
+                raise RuntimeError("Classifier result has no probabilities.")
+            class_id = int(result.probs.top1)
+            confidence = float(result.probs.top1conf.detach().cpu().item())
+            names = result.names or {}
+            probability_values = result.probs.data.detach().cpu().tolist()
+            class_probabilities = {
+                str(names.get(index, index)).upper(): float(probability)
+                for index, probability in enumerate(probability_values)
+            }
+            height, width = frame.shape[:2]
+            detections.append(
+                Detection(
+                    bbox=(0.0, 0.0, float(width), float(height)),
+                    confidence=confidence,
+                    class_id=class_id,
+                    class_name=str(names.get(class_id, class_id)).upper(),
+                    metadata={"class_probabilities": class_probabilities},
+                )
+            )
+        return detections

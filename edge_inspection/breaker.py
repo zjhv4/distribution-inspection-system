@@ -147,12 +147,7 @@ class BreakerStateDetector:
         best_by_asset: dict[str, Detection] = {}
         for detection in detections:
             class_name = detection.class_name.upper()
-            anomaly_score = self._anomaly_score(detection)
-            score_is_anomalous = (
-                anomaly_score is not None
-                and anomaly_score >= self.config.anomaly_score_threshold
-            )
-            if class_name not in deviation_names | closed_names and not score_is_anomalous:
+            if class_name not in deviation_names | closed_names:
                 continue
             key = self._asset_key(detection)
             current = best_by_asset.get(key)
@@ -179,17 +174,11 @@ class BreakerStateDetector:
 
             state.missing_frames = 0
             class_name = detection.class_name.upper()
-            anomaly_score = self._anomaly_score(detection)
-            score_is_anomalous = (
-                anomaly_score is not None
-                and anomaly_score >= self.config.anomaly_score_threshold
-            )
-            is_deviation = class_name in deviation_names or score_is_anomalous
+            is_deviation = class_name in deviation_names
             if not self._observation_is_reliable(
                 detection,
                 class_name=class_name,
                 is_deviation=is_deviation,
-                score_is_anomalous=score_is_anomalous,
             ):
                 self._reset_unconfirmed_transition(state)
                 continue
@@ -214,8 +203,6 @@ class BreakerStateDetector:
                 if state.evidence_sources is None:
                     state.evidence_sources = set()
                 state.evidence_sources.add(f"visual:{class_name}")
-                if score_is_anomalous:
-                    state.evidence_sources.add("visual:anomaly_score")
                 if confirmed:
                     state.evidence_sources.add("control:trip_confirmation")
 
@@ -235,7 +222,6 @@ class BreakerStateDetector:
                                 state,
                                 detection,
                                 observed_class=class_name,
-                                anomaly_score=anomaly_score,
                             ),
                         )
                     )
@@ -265,7 +251,6 @@ class BreakerStateDetector:
                                 state,
                                 detection,
                                 observed_class=class_name,
-                                anomaly_score=anomaly_score,
                             ),
                             "confirmation_frames": state.open_frames,
                             "open_duration_seconds": self._open_duration_seconds(
@@ -340,7 +325,6 @@ class BreakerStateDetector:
                             state,
                             detection,
                             observed_class=class_name,
-                            anomaly_score=anomaly_score,
                         ),
                         "open_duration_frames": state.open_frames,
                         "open_duration_seconds": self._open_duration_seconds(
@@ -383,12 +367,9 @@ class BreakerStateDetector:
         *,
         class_name: str,
         is_deviation: bool,
-        score_is_anomalous: bool,
     ) -> bool:
         if detection.metadata.get("observation_valid") is False:
             return False
-        if detection.metadata.get("decision_basis") == "site_reference_geometry":
-            return True
         threshold = self.config.observation_confidence
         if threshold <= 0:
             return True
@@ -398,8 +379,6 @@ class BreakerStateDetector:
             visual_confidence = float(class_probability)
         else:
             visual_confidence = float(detection.confidence)
-        if score_is_anomalous:
-            return bool(detection.metadata.get("anomaly_calibration_ready", False))
         if not is_deviation and class_name not in {
             name.upper() for name in self.config.closed_classes
         }:
@@ -513,13 +492,6 @@ class BreakerStateDetector:
             self._reset_open_transition(state)
 
     @staticmethod
-    def _anomaly_score(detection: Detection) -> float | None:
-        value = detection.metadata.get("anomaly_score")
-        if isinstance(value, (int, float)):
-            return float(value)
-        return None
-
-    @staticmethod
     def _metadata_flag(detection: Detection, keys: list[str]) -> bool:
         return any(bool(detection.metadata.get(key)) for key in keys)
 
@@ -534,7 +506,6 @@ class BreakerStateDetector:
         detection: Detection,
         *,
         observed_class: str,
-        anomaly_score: float | None,
     ) -> dict:
         metadata = {
             **detection.metadata,
@@ -545,8 +516,6 @@ class BreakerStateDetector:
             "command_suppressed": state.suppressed_by_command,
             "evidence_sources": sorted(state.evidence_sources or set()),
         }
-        if anomaly_score is not None:
-            metadata["anomaly_score"] = anomaly_score
         return metadata
 
     @staticmethod

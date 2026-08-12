@@ -4,10 +4,8 @@ models:
   intrusion_profiles:
     power_visible: models/intrusion_power_visible_yolo11l.pt
     legacy_mixed: models/intrusion_legacy_mixed_yolo11l.pt
-  breaker:
-  breaker_classifier: models/breaker_mcb_closed_open_yolo11s_cls.pt
-  breaker_anomaly: models/dinov2_vits14.safetensors
-  breaker_anomaly_calibration:
+  breaker: models/breaker_mobile_types_yolo11s.pt
+  breaker_state_classifier: models/breaker_mcb_state_yolo11s_cls.pt
 
 runtime:
   device: "0"
@@ -43,11 +41,10 @@ intrusion:
           end: "19:00"
 
 breaker:
-  mode: roi_reference
+  mode: mobile_detection
   # OPEN/外观偏离是视觉观测，TRIP/MICRO_TRIP 是时序事件。
   decision_mode: temporal_evidence
-  confidence: 0.30
-  classifier_confidence: 0.45
+  confidence: 0.35
   classifier_imgsz: 224
   iou: 0.45
   abnormal_classes: ["TRIP", "MICRO_TRIP"]
@@ -59,24 +56,18 @@ breaker:
   recovery_consecutive_frames: 2
   open_classes: ["OPEN"]
   closed_classes: ["CLOSE", "CLOSED"]
-  deviation_classes: ["OPEN", "ANOMALY", "INTERMEDIATE", "VISUAL_DEVIATION"]
-  anomaly_score_threshold: 0.50
-  anomaly_backend: dinov2_reference
-  anomaly_bootstrap_frames: 100
-  anomaly_bank_size: 300
-  anomaly_sample_stride: 15
-  anomaly_neighbors: 5
-  anomaly_normal_confidence: 0.90
-  anomaly_normal_quantile: 0.995
-  anomaly_min_raw_threshold: 0.02
-  # 固定机位下使用现场同一设备的两张基准图判断拨杆位置。
-  reference_similarity: 0.65
-  reference_margin: 0.05
-  reference_search_pixels: 5
-  reference_x1_ratio: 0.08
-  reference_x2_ratio: 0.92
-  reference_y1_ratio: 0.42
-  reference_y2_ratio: 0.98
+  deviation_classes: ["OPEN"]
+  mobile_device_classes: ["MCB"]
+  mobile_tracker_iou_threshold: 0.25
+  mobile_tracker_max_missing_frames: 15
+  mobile_tracker: bytetrack.yaml
+  handle_up_means_closed: true
+  mobile_state_confidence: 0.75
+  mobile_state_unknown_margin: 0.15
+  mobile_confirm_closed_geometry: true
+  mobile_closed_confirm_seconds: 0.5
+  # 按现场设备清单设置同帧上限，不限制设备位置。
+  mobile_class_limits: {MCB: 10, RCD: 2, ISOLATOR: 1}
   micro_trip_min_frames: 2
   trip_confirm_frames: 3
   micro_trip_max_frames: 2
@@ -84,7 +75,7 @@ breaker:
   # 时序告警按视频时间计算，避免阈值随帧率变化。
   temporal_seconds_enabled: true
   # 只有高置信状态才进入状态机；其余观测用于中断抖动序列。
-  observation_confidence: 0.98
+  observation_confidence: 0.60
   # 摄像头启动或事件恢复后，先连续观察稳定闭合状态再布防。
   arm_closed_seconds: 30.0
   micro_trip_min_seconds: 0.5
@@ -95,21 +86,15 @@ breaker:
   rearm_after_event: true
   command_metadata_keys: ["commanded_open", "expected_open", "maintenance_mode"]
   trip_confirmation_keys: ["protection_trip", "trip_coil_active", "auxiliary_trip"]
-  rois:
-    # 部署时替换为 QF1 的实际区域。
-    - name: QF1
-      bbox: [0, 0, 1919, 1079]
-      closed_reference: runtime/breaker_references/QF1_closed.jpg
-      open_reference: runtime/breaker_references/QF1_open.jpg
 
 alarm:
-  jsonl_path: alarms/rtx_6_20_alerts.jsonl
+  jsonl_path: alarms/inspection_alerts.jsonl
   save_snapshots: true
-  snapshot_dir: alarms/rtx_6_20_snapshots
+  snapshot_dir: alarms/inspection_snapshots
   webhook_url: http://127.0.0.1:18088/alerts
   webhook_timeout_seconds: 3
   webhook_retries: 3
-  outbox_db_path: alarms/rtx_6_20_outbox.sqlite3
+  outbox_db_path: alarms/inspection_outbox.sqlite3
   background_delivery: true
   retry_base_seconds: 1
   retry_max_seconds: 60

@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `intrusion_power_visible_yolo11l.pt` | 真实配电/变电可见光人员检测 | `5141d15a1797e372f41aaa52adb7a1efd9b027a1c8af98cb59acaf876b564903` |
 | `intrusion_legacy_mixed_yolo11l.pt` | 旧 CCTV/热成像混合域兼容 | `a72554200809810ad72fc9107baebf2c51c915c9bf6cf912f9edf0c09565b131` |
-| `breaker_mcb_closed_open_yolo11s_cls.pt` | 历史断路器分类权重，仅用于兼容旧配置 | `f150a7697f7918226e166a7a9a6c3eaf05ddd26253b0c54da924e82e67594a93` |
-| `dinov2_vits14.safetensors` | 按资产建立现场正常特征库 | `04d27f3400d059fc0cfd7d17dd1909a75bf3ea8fb3eeb48b97cb99e57ee20081` |
+| `breaker_mobile_types_yolo11s.pt` | 移动画面 MCB/RCD/ISOLATOR 检测 | `c8a32b41d45b42943fc665426b30d8ece4ca3777bdcfca1da87ce493e7278352` |
+| `breaker_mcb_state_yolo11s_cls.pt` | MCB 拨杆 OPEN/CLOSED/UNKNOWN 分类 | `4483390aee03ec7815403adeae814651fa58a6722b9d98ef0b584a6c2c0f2cd6` |
 
-`power_visible` 用于普通可见光配电、变电画面，`legacy_mixed` 用于旧 CCTV 或热成像画面。断路器默认使用现场 CLOSED/OPEN 基准图和固定 ROI 判定，历史分类权重不再作为默认主判据。
+`power_visible` 用于普通可见光配电、变电画面，`legacy_mixed` 用于旧 CCTV 或热成像画面。断路器默认先实时识别设备类型，再对检测到的 MCB 判断拨杆状态。
