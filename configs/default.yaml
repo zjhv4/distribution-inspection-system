@@ -4,9 +4,8 @@ models:
   intrusion_profiles:
     power_visible: models/intrusion_power_visible_yolo11l.pt
     legacy_mixed: models/intrusion_legacy_mixed_yolo11l.pt
-  # 配置经现场设备数据验收的状态模型后再启用断路器任务。
   breaker:
-  breaker_classifier:
+  breaker_classifier: models/breaker_mcb_closed_open_yolo11s_cls.pt
   breaker_anomaly: models/dinov2_vits14.safetensors
   breaker_anomaly_calibration:
 
@@ -20,7 +19,7 @@ intrusion:
   model_profile: power_visible
   person_class_names: ["person"]
   # 置信度阈值由验证集选定。
-  confidence: 0.28
+  confidence: 0.45
   iou: 0.45
   min_consecutive_frames: 3
   recovery_consecutive_frames: 5
@@ -44,7 +43,7 @@ intrusion:
           end: "19:00"
 
 breaker:
-  mode: detection_hybrid
+  mode: roi_classification
   # OPEN/外观偏离是视觉观测，TRIP/MICRO_TRIP 是时序事件。
   decision_mode: temporal_evidence
   confidence: 0.30

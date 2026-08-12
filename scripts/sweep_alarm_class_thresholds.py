@@ -8,7 +8,7 @@ import cv2
 import yaml
 
 
-IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def main() -> None:
@@ -135,8 +135,11 @@ def main() -> None:
 
 
 def iter_images(path: Path):
-    for suffix in IMAGE_SUFFIXES:
-        yield from path.rglob(f"*{suffix}")
+    yield from sorted(
+        candidate
+        for candidate in path.rglob("*")
+        if candidate.is_file() and candidate.suffix.lower() in IMAGE_SUFFIXES
+    )
 
 
 def default_thresholds() -> list[float]:
