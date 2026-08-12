@@ -78,12 +78,17 @@ def run_video(
 
     alarm_sink = JsonlAlarmSink(config.alarm)
     frame_id = 0
+    source_fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
 
     while True:
         ok, frame = capture.read()
         if not ok:
             break
         frame_id += 1
+        position_ms = capture.get(cv2.CAP_PROP_POS_MSEC)
+        observed_at_seconds = (
+            position_ms / 1000.0 if position_ms > 0 else (frame_id - 1) / source_fps
+        )
         start = perf_counter()
 
         detections: list[Detection] = []
@@ -111,7 +116,13 @@ def run_video(
                     config,
                 )
             detections.extend(breaker_detections)
-            events.extend(breaker.update(breaker_detections, frame_id=frame_id))
+            events.extend(
+                breaker.update(
+                    breaker_detections,
+                    frame_id=frame_id,
+                    observed_at_seconds=observed_at_seconds,
+                )
+            )
         elif breaker_classifier is not None:
             breaker_detections = classify_breaker_rois(
                 frame,
@@ -120,7 +131,13 @@ def run_video(
                 anomaly_scorer=breaker_anomaly_scorer,
             )
             detections.extend(breaker_detections)
-            events.extend(breaker.update(breaker_detections, frame_id=frame_id))
+            events.extend(
+                breaker.update(
+                    breaker_detections,
+                    frame_id=frame_id,
+                    observed_at_seconds=observed_at_seconds,
+                )
+            )
 
         latency_ms = (perf_counter() - start) * 1000
         for event in events:

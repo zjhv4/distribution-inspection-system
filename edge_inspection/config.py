@@ -104,6 +104,15 @@ class BreakerConfig:
     trip_confirm_frames: int = 5
     micro_trip_max_frames: int = 4
     max_missing_frames: int = 1
+    temporal_seconds_enabled: bool = False
+    observation_confidence: float = 0.0
+    arm_closed_seconds: float = 0.0
+    micro_trip_min_seconds: float = 0.0
+    micro_trip_max_seconds: float = 0.0
+    trip_confirm_seconds: float = 0.0
+    recovery_seconds: float = 0.0
+    max_observation_gap_seconds: float = 0.0
+    rearm_after_event: bool = False
     command_metadata_keys: list[str] = field(
         default_factory=lambda: ["commanded_open", "expected_open", "maintenance_mode"]
     )
@@ -218,6 +227,30 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
             raise ValueError("breaker.anomaly_bootstrap_frames must be at least 2")
         if int(breaker_raw.get("anomaly_neighbors", 5)) < 1:
             raise ValueError("breaker.anomaly_neighbors must be positive")
+        observation_confidence = float(breaker_raw.get("observation_confidence", 0.0))
+        if not 0 <= observation_confidence <= 1:
+            raise ValueError("breaker.observation_confidence must be in [0, 1]")
+        if bool(breaker_raw.get("temporal_seconds_enabled", False)):
+            arm_seconds = float(breaker_raw.get("arm_closed_seconds", 0.0))
+            micro_min_seconds = float(breaker_raw.get("micro_trip_min_seconds", 0.0))
+            micro_max_seconds = float(breaker_raw.get("micro_trip_max_seconds", 0.0))
+            trip_seconds = float(breaker_raw.get("trip_confirm_seconds", 0.0))
+            recovery_seconds = float(breaker_raw.get("recovery_seconds", 0.0))
+            gap_seconds = float(breaker_raw.get("max_observation_gap_seconds", 0.0))
+            if arm_seconds <= 0:
+                raise ValueError("breaker.arm_closed_seconds must be positive")
+            if micro_min_seconds <= 0 or micro_min_seconds > micro_max_seconds:
+                raise ValueError(
+                    "breaker.micro_trip_min_seconds must be in (0, micro_trip_max_seconds]"
+                )
+            if micro_max_seconds >= trip_seconds:
+                raise ValueError(
+                    "breaker.micro_trip_max_seconds must be less than trip_confirm_seconds"
+                )
+            if recovery_seconds <= 0:
+                raise ValueError("breaker.recovery_seconds must be positive")
+            if gap_seconds <= 0:
+                raise ValueError("breaker.max_observation_gap_seconds must be positive")
     breaker_rois = [
         BreakerRoiConfig(name=item["name"], bbox=tuple(float(value) for value in item["bbox"]))
         for item in breaker_raw.pop("rois", [])

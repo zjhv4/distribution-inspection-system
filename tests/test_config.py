@@ -22,3 +22,11 @@ def test_unknown_intrusion_profile_fails_closed() -> None:
     config.intrusion.model_profile = "not_declared"
     with pytest.raises(RuntimeError, match="no matching model"):
         resolve_intrusion_weights(config)
+
+
+def test_default_breaker_uses_time_based_debounce() -> None:
+    config = load_site_config("configs/default.yaml")
+    assert config.breaker.temporal_seconds_enabled is True
+    assert config.breaker.observation_confidence == pytest.approx(0.98)
+    assert config.breaker.arm_closed_seconds == pytest.approx(30.0)
+    assert config.breaker.micro_trip_max_seconds < config.breaker.trip_confirm_seconds

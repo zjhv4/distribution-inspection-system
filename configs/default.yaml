@@ -73,6 +73,18 @@ breaker:
   trip_confirm_frames: 3
   micro_trip_max_frames: 2
   max_missing_frames: 1
+  # 时序告警按视频时间计算，避免阈值随帧率变化。
+  temporal_seconds_enabled: true
+  # 只有高置信状态才进入状态机；其余观测用于中断抖动序列。
+  observation_confidence: 0.98
+  # 摄像头启动或事件恢复后，先连续观察稳定闭合状态再布防。
+  arm_closed_seconds: 30.0
+  micro_trip_min_seconds: 0.5
+  micro_trip_max_seconds: 1.2
+  trip_confirm_seconds: 3.0
+  recovery_seconds: 1.0
+  max_observation_gap_seconds: 0.5
+  rearm_after_event: true
   command_metadata_keys: ["commanded_open", "expected_open", "maintenance_mode"]
   trip_confirmation_keys: ["protection_trip", "trip_coil_active", "auxiliary_trip"]
   rois:

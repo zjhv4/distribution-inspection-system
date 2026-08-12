@@ -391,6 +391,148 @@ def test_temporal_evidence_marks_protection_confirmed_trip() -> None:
     assert "control:trip_confirmation" in events[0].metadata["evidence_sources"]
 
 
+def test_temporal_seconds_requires_stable_closed_arming() -> None:
+    detector = BreakerStateDetector(
+        BreakerConfig(
+            decision_mode="temporal_open",
+            temporal_seconds_enabled=True,
+            observation_confidence=0.9,
+            arm_closed_seconds=3.0,
+            micro_trip_min_seconds=0.5,
+            micro_trip_max_seconds=1.0,
+            trip_confirm_seconds=2.0,
+            recovery_seconds=0.5,
+            max_observation_gap_seconds=0.6,
+            rearm_after_event=True,
+        )
+    )
+    opened = Detection(
+        (0, 0, 10, 10),
+        0.99,
+        1,
+        "OPEN",
+        {"roi_name": "QF1", "class_probabilities": {"OPEN": 0.99, "CLOSED": 0.01}},
+    )
+    closed = Detection(
+        (0, 0, 10, 10),
+        0.99,
+        0,
+        "CLOSED",
+        {"roi_name": "QF1", "class_probabilities": {"OPEN": 0.01, "CLOSED": 0.99}},
+    )
+
+    assert detector.update([opened], frame_id=1, observed_at_seconds=0.0) == []
+    assert detector.update([opened], frame_id=2, observed_at_seconds=0.5) == []
+    assert detector.update([opened], frame_id=3, observed_at_seconds=1.0) == []
+    for frame_id, seconds in enumerate((2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0), start=4):
+        assert detector.update([closed], frame_id=frame_id, observed_at_seconds=seconds) == []
+
+    assert detector.update([opened], frame_id=11, observed_at_seconds=5.2) == []
+    assert detector.update([opened], frame_id=12, observed_at_seconds=5.8) == []
+    assert detector.update([closed], frame_id=13, observed_at_seconds=6.0) == []
+    events = detector.update([closed], frame_id=14, observed_at_seconds=6.6)
+    assert [event.alert_type for event in events] == ["MICRO_TRIP", "MICRO_TRIP"]
+    assert 0.5 <= events[0].metadata["open_duration_seconds"] <= 1.0
+
+
+def test_temporal_seconds_rejects_low_confidence_state_flip() -> None:
+    detector = BreakerStateDetector(
+        BreakerConfig(
+            decision_mode="temporal_open",
+            temporal_seconds_enabled=True,
+            observation_confidence=0.98,
+            arm_closed_seconds=1.0,
+            micro_trip_min_seconds=0.4,
+            micro_trip_max_seconds=1.0,
+            trip_confirm_seconds=2.0,
+            recovery_seconds=0.4,
+            max_observation_gap_seconds=0.6,
+            rearm_after_event=True,
+        )
+    )
+    closed = Detection(
+        (0, 0, 10, 10),
+        0.99,
+        0,
+        "CLOSED",
+        {"roi_name": "QF1", "class_probabilities": {"OPEN": 0.01, "CLOSED": 0.99}},
+    )
+    uncertain_open = Detection(
+        (0, 0, 10, 10),
+        0.60,
+        1,
+        "OPEN",
+        {"roi_name": "QF1", "class_probabilities": {"OPEN": 0.60, "CLOSED": 0.40}},
+    )
+
+    for frame_id, seconds in enumerate((0.0, 0.5, 1.0), start=1):
+        assert detector.update([closed], frame_id=frame_id, observed_at_seconds=seconds) == []
+    assert detector.update([uncertain_open], frame_id=4, observed_at_seconds=1.2) == []
+    assert detector.update([uncertain_open], frame_id=5, observed_at_seconds=1.8) == []
+    assert detector.update([closed], frame_id=6, observed_at_seconds=2.0) == []
+    assert detector.update([closed], frame_id=7, observed_at_seconds=2.5) == []
+
+
+def test_temporal_seconds_emits_trip_and_recovery() -> None:
+    detector = BreakerStateDetector(
+        BreakerConfig(
+            decision_mode="temporal_open",
+            temporal_seconds_enabled=True,
+            observation_confidence=0.9,
+            arm_closed_seconds=1.0,
+            micro_trip_min_seconds=0.4,
+            micro_trip_max_seconds=1.0,
+            trip_confirm_seconds=2.0,
+            recovery_seconds=0.5,
+            max_observation_gap_seconds=0.6,
+            rearm_after_event=True,
+        )
+    )
+    closed = Detection((0, 0, 10, 10), 0.99, 0, "CLOSED", {"roi_name": "QF1"})
+    opened = Detection((0, 0, 10, 10), 0.99, 1, "OPEN", {"roi_name": "QF1"})
+
+    for frame_id, seconds in enumerate((0.0, 0.5, 1.0), start=1):
+        assert detector.update([closed], frame_id=frame_id, observed_at_seconds=seconds) == []
+    assert detector.update([opened], frame_id=4, observed_at_seconds=1.2) == []
+    assert detector.update([opened], frame_id=5, observed_at_seconds=1.7) == []
+    assert detector.update([opened], frame_id=6, observed_at_seconds=2.2) == []
+    assert detector.update([opened], frame_id=7, observed_at_seconds=2.7) == []
+    started = detector.update([opened], frame_id=8, observed_at_seconds=3.2)
+    assert len(started) == 1 and started[0].alert_type == "TRIP"
+    assert started[0].metadata["open_duration_seconds"] == 2.0
+
+    assert detector.update([closed], frame_id=9, observed_at_seconds=3.4) == []
+    recovered = detector.update([closed], frame_id=10, observed_at_seconds=3.9)
+    assert len(recovered) == 1 and recovered[0].phase == "RECOVERED"
+    assert recovered[0].event_id == started[0].event_id
+
+
+def test_temporal_seconds_resets_after_timestamp_gap() -> None:
+    detector = BreakerStateDetector(
+        BreakerConfig(
+            decision_mode="temporal_open",
+            temporal_seconds_enabled=True,
+            observation_confidence=0.9,
+            arm_closed_seconds=1.0,
+            micro_trip_min_seconds=0.4,
+            micro_trip_max_seconds=1.0,
+            trip_confirm_seconds=2.0,
+            recovery_seconds=0.4,
+            max_observation_gap_seconds=0.6,
+            rearm_after_event=True,
+        )
+    )
+    closed = Detection((0, 0, 10, 10), 0.99, 0, "CLOSED", {"roi_name": "QF1"})
+    opened = Detection((0, 0, 10, 10), 0.99, 1, "OPEN", {"roi_name": "QF1"})
+
+    for frame_id, seconds in enumerate((0.0, 0.5, 1.0), start=1):
+        assert detector.update([closed], frame_id=frame_id, observed_at_seconds=seconds) == []
+    assert detector.update([opened], frame_id=4, observed_at_seconds=1.2) == []
+    assert detector.update([opened], frame_id=5, observed_at_seconds=2.2) == []
+    assert detector.update([closed], frame_id=6, observed_at_seconds=2.4) == []
+    assert detector.update([closed], frame_id=7, observed_at_seconds=2.9) == []
+
+
 def test_assign_breaker_assets_uses_configured_roi() -> None:
     config = SiteConfig(
         models=ModelsConfig(),
