@@ -43,7 +43,7 @@ intrusion:
           end: "19:00"
 
 breaker:
-  mode: roi_classification
+  mode: roi_reference
   # OPEN/外观偏离是视觉观测，TRIP/MICRO_TRIP 是时序事件。
   decision_mode: temporal_evidence
   confidence: 0.30
@@ -69,6 +69,14 @@ breaker:
   anomaly_normal_confidence: 0.90
   anomaly_normal_quantile: 0.995
   anomaly_min_raw_threshold: 0.02
+  # 固定机位下使用现场同一设备的两张基准图判断拨杆位置。
+  reference_similarity: 0.65
+  reference_margin: 0.05
+  reference_search_pixels: 5
+  reference_x1_ratio: 0.08
+  reference_x2_ratio: 0.92
+  reference_y1_ratio: 0.42
+  reference_y2_ratio: 0.98
   micro_trip_min_frames: 2
   trip_confirm_frames: 3
   micro_trip_max_frames: 2
@@ -91,6 +99,8 @@ breaker:
     # 部署时替换为 QF1 的实际区域。
     - name: QF1
       bbox: [0, 0, 1919, 1079]
+      closed_reference: runtime/breaker_references/QF1_closed.jpg
+      open_reference: runtime/breaker_references/QF1_open.jpg
 
 alarm:
   jsonl_path: alarms/rtx_6_20_alerts.jsonl

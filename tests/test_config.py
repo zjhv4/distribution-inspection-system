@@ -30,3 +30,13 @@ def test_default_breaker_uses_time_based_debounce() -> None:
     assert config.breaker.observation_confidence == pytest.approx(0.98)
     assert config.breaker.arm_closed_seconds == pytest.approx(30.0)
     assert config.breaker.micro_trip_max_seconds < config.breaker.trip_confirm_seconds
+
+
+def test_breaker_reference_roi_fields_are_loaded(tmp_path) -> None:
+    config_text = open("configs/default.yaml", encoding="utf-8").read()
+    path = tmp_path / "site.yaml"
+    path.write_text(config_text, encoding="utf-8")
+    config = load_site_config(path)
+    assert config.breaker.mode == "roi_reference"
+    assert config.breaker.rois[0].closed_reference.endswith("QF1_closed.jpg")
+    assert config.breaker.rois[0].open_reference.endswith("QF1_open.jpg")

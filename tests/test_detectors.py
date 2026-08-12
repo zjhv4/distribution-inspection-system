@@ -1,4 +1,5 @@
 from edge_inspection.breaker import BreakerStateDetector
+from edge_inspection.breaker_reference import BreakerReferenceClassifier
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -7,6 +8,7 @@ from edge_inspection.events import Detection
 from edge_inspection.intrusion import IntrusionDetector
 from edge_inspection.pipeline import (
     assign_breaker_assets,
+    classify_breaker_reference_rois,
     classify_breaker_rois,
     score_breaker_detection_crops,
 )
@@ -226,6 +228,90 @@ def test_breaker_roi_classifier_detection_metadata() -> None:
 
     events = BreakerStateDetector(config.breaker).update(detections, frame_id=1)
     assert events[0].metadata["roi_name"] == "QF1"
+
+
+def test_breaker_reference_classifier_matches_known_handle_position(tmp_path) -> None:
+    reference = np.full((100, 50, 3), 230, dtype=np.uint8)
+    reference[50:92, 14:36] = 20
+    reference[72:92, 8:42] = 35
+    path = tmp_path / "qf1_open.png"
+    import cv2
+
+    assert cv2.imwrite(str(path), reference)
+    config = BreakerConfig(
+        mode="roi_reference",
+        reference_similarity=0.8,
+        rois=[
+            BreakerRoiConfig(
+                name="QF1",
+                bbox=(0, 0, 50, 100),
+                open_reference=str(path),
+            )
+        ],
+    )
+    classifier = BreakerReferenceClassifier(config)
+    detections = classify_breaker_reference_rois(reference.copy(), classifier, SiteConfig(
+        models=ModelsConfig(),
+        runtime=RuntimeConfig(),
+        intrusion=IntrusionConfig(zones=[]),
+        breaker=config,
+    ))
+    assert len(detections) == 1
+    assert detections[0].class_name == "OPEN"
+    assert detections[0].metadata["observation_valid"] is True
+    assert detections[0].metadata["decision_basis"] == "site_reference_geometry"
+
+
+def test_breaker_reference_classifier_returns_unknown_for_occlusion(tmp_path) -> None:
+    import cv2
+
+    reference = np.full((100, 50, 3), 230, dtype=np.uint8)
+    reference[50:92, 14:36] = 20
+    path = tmp_path / "qf1_open.png"
+    assert cv2.imwrite(str(path), reference)
+    config = BreakerConfig(
+        mode="roi_reference",
+        reference_similarity=0.8,
+        rois=[BreakerRoiConfig("QF1", (0, 0, 50, 100), open_reference=str(path))],
+    )
+    result = BreakerReferenceClassifier(config).predict(
+        np.zeros_like(reference),
+        asset_id="QF1",
+    )
+    assert result.class_name == "UNKNOWN"
+    assert result.metadata["observation_valid"] is False
+
+
+def test_breaker_reference_classifier_distinguishes_two_handle_positions(tmp_path) -> None:
+    import cv2
+
+    closed = np.full((100, 50, 3), 230, dtype=np.uint8)
+    closed[44:66, 12:38] = 20
+    closed[44:56, 7:43] = 35
+    opened = np.full((100, 50, 3), 230, dtype=np.uint8)
+    opened[62:92, 14:36] = 20
+    opened[78:92, 8:42] = 35
+    closed_path = tmp_path / "closed.png"
+    open_path = tmp_path / "open.png"
+    assert cv2.imwrite(str(closed_path), closed)
+    assert cv2.imwrite(str(open_path), opened)
+    config = BreakerConfig(
+        mode="roi_reference",
+        reference_similarity=0.7,
+        reference_margin=0.05,
+        reference_search_pixels=2,
+        rois=[
+            BreakerRoiConfig(
+                "QF1",
+                (0, 0, 50, 100),
+                closed_reference=str(closed_path),
+                open_reference=str(open_path),
+            )
+        ],
+    )
+    classifier = BreakerReferenceClassifier(config)
+    assert classifier.predict(closed, asset_id="QF1").class_name == "CLOSED"
+    assert classifier.predict(opened, asset_id="QF1").class_name == "OPEN"
 
 
 def test_temporal_open_short_pulse_becomes_micro_trip() -> None:

@@ -19,6 +19,8 @@ def draw_overlay(frame: np.ndarray, config: SiteConfig, detections: list[Detecti
     for detection in detections:
         x1, y1, x2, y2 = map(int, detection.bbox)
         color = (0, 255, 0)
+        if detection.class_name.upper() == "UNKNOWN":
+            color = (0, 200, 255)
         if detection.class_name.upper() in {name.upper() for name in config.breaker.abnormal_classes}:
             color = (0, 0, 255)
         cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)

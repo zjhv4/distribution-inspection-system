@@ -8,6 +8,7 @@ import cv2
 from .alarm import JsonlAlarmSink
 from .anomaly import DinoReferenceAnomalyScorer, ReconstructionAnomalyScorer
 from .breaker import BreakerStateDetector
+from .breaker_reference import BreakerReferenceClassifier
 from .config import SiteConfig, TaskName
 from .drawing import draw_overlay
 from .events import AlertEvent, Detection
@@ -39,6 +40,7 @@ def run_video(
     breaker_model = None
     breaker_classifier = None
     breaker_anomaly_scorer = None
+    breaker_reference_classifier = None
     if task in ("intrusion", "all"):
         intrusion_model = YoloDetector(
             resolve_intrusion_weights(config),
@@ -48,7 +50,11 @@ def run_video(
         )
         intrusion = IntrusionDetector(config.intrusion)
     if task in ("breaker", "all"):
-        if config.breaker.mode in {"roi_classification", "roi_hybrid"}:
+        if config.breaker.mode == "roi_reference":
+            if not config.breaker.rois:
+                raise RuntimeError("breaker.mode=roi_reference requires at least one breaker.rois entry.")
+            breaker_reference_classifier = BreakerReferenceClassifier(config.breaker)
+        elif config.breaker.mode in {"roi_classification", "roi_hybrid"}:
             if not config.models.breaker_classifier:
                 raise RuntimeError(f"breaker.mode={config.breaker.mode} requires models.breaker_classifier.")
             if not config.breaker.rois:
@@ -129,6 +135,20 @@ def run_video(
                 breaker_classifier,
                 config,
                 anomaly_scorer=breaker_anomaly_scorer,
+            )
+            detections.extend(breaker_detections)
+            events.extend(
+                breaker.update(
+                    breaker_detections,
+                    frame_id=frame_id,
+                    observed_at_seconds=observed_at_seconds,
+                )
+            )
+        elif breaker_reference_classifier is not None:
+            breaker_detections = classify_breaker_reference_rois(
+                frame,
+                breaker_reference_classifier,
+                config,
             )
             detections.extend(breaker_detections)
             events.extend(
@@ -247,6 +267,34 @@ def classify_breaker_rois(
                 class_id=class_id,
                 class_name=class_name,
                 metadata=metadata,
+            )
+        )
+    return detections
+
+
+def classify_breaker_reference_rois(
+    frame,
+    classifier: BreakerReferenceClassifier,
+    config: SiteConfig,
+) -> list[Detection]:
+    detections: list[Detection] = []
+    height, width = frame.shape[:2]
+    for roi in config.breaker.rois:
+        x1, y1, x2, y2 = roi.bbox
+        left = max(0, min(width, int(round(x1))))
+        top = max(0, min(height, int(round(y1))))
+        right = max(0, min(width, int(round(x2))))
+        bottom = max(0, min(height, int(round(y2))))
+        if right <= left or bottom <= top:
+            continue
+        result = classifier.predict(frame[top:bottom, left:right], asset_id=roi.name)
+        detections.append(
+            Detection(
+                bbox=(float(left), float(top), float(right), float(bottom)),
+                confidence=result.confidence,
+                class_id=result.class_id,
+                class_name=result.class_name,
+                metadata={**result.metadata, "roi_name": roi.name},
             )
         )
     return detections

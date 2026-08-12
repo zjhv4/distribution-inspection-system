@@ -69,6 +69,8 @@ class IntrusionConfig:
 class BreakerRoiConfig:
     name: str
     bbox: tuple[float, float, float, float]
+    closed_reference: str | None = None
+    open_reference: str | None = None
 
 
 @dataclass
@@ -113,6 +115,15 @@ class BreakerConfig:
     recovery_seconds: float = 0.0
     max_observation_gap_seconds: float = 0.0
     rearm_after_event: bool = False
+    reference_similarity: float = 0.65
+    reference_margin: float = 0.05
+    reference_search_pixels: int = 5
+    reference_x1_ratio: float = 0.08
+    reference_x2_ratio: float = 0.92
+    reference_y1_ratio: float = 0.42
+    reference_y2_ratio: float = 0.98
+    reference_width: int = 64
+    reference_height: int = 64
     command_metadata_keys: list[str] = field(
         default_factory=lambda: ["commanded_open", "expected_open", "maintenance_mode"]
     )
@@ -251,10 +262,40 @@ def _site_config_from_dict(raw: dict) -> SiteConfig:
                 raise ValueError("breaker.recovery_seconds must be positive")
             if gap_seconds <= 0:
                 raise ValueError("breaker.max_observation_gap_seconds must be positive")
-    breaker_rois = [
-        BreakerRoiConfig(name=item["name"], bbox=tuple(float(value) for value in item["bbox"]))
-        for item in breaker_raw.pop("rois", [])
-    ]
+    breaker_rois = []
+    for item in breaker_raw.pop("rois", []):
+        roi_raw = dict(item)
+        roi_raw["bbox"] = tuple(float(value) for value in roi_raw["bbox"])
+        breaker_rois.append(BreakerRoiConfig(**roi_raw))
+    breaker_mode = str(breaker_raw.get("mode", "detection"))
+    if breaker_mode == "roi_reference":
+        if not breaker_rois:
+            raise ValueError("breaker.mode=roi_reference requires at least one ROI")
+        missing_references = [
+            roi.name
+            for roi in breaker_rois
+            if not roi.closed_reference or not roi.open_reference
+        ]
+        if missing_references:
+            raise ValueError(
+                "breaker.mode=roi_reference requires CLOSED and OPEN references for: "
+                + ", ".join(missing_references)
+            )
+        similarity = float(breaker_raw.get("reference_similarity", 0.65))
+        margin = float(breaker_raw.get("reference_margin", 0.05))
+        if not 0 <= similarity <= 1:
+            raise ValueError("breaker.reference_similarity must be in [0, 1]")
+        if not 0 <= margin <= 1:
+            raise ValueError("breaker.reference_margin must be in [0, 1]")
+        defaults = BreakerConfig()
+        for start_key, end_key in (
+            ("reference_x1_ratio", "reference_x2_ratio"),
+            ("reference_y1_ratio", "reference_y2_ratio"),
+        ):
+            start = float(breaker_raw.get(start_key, getattr(defaults, start_key)))
+            end = float(breaker_raw.get(end_key, getattr(defaults, end_key)))
+            if not 0 <= start < end <= 1:
+                raise ValueError(f"breaker.{start_key}/{end_key} must define a region in [0, 1]")
 
     return SiteConfig(
         models=ModelsConfig(**raw.get("models", {})),

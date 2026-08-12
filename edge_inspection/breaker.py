@@ -387,6 +387,8 @@ class BreakerStateDetector:
     ) -> bool:
         if detection.metadata.get("observation_valid") is False:
             return False
+        if detection.metadata.get("decision_basis") == "site_reference_geometry":
+            return True
         threshold = self.config.observation_confidence
         if threshold <= 0:
             return True
