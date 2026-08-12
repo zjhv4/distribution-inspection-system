@@ -7,7 +7,14 @@ import cv2
 
 from .alarm import JsonlAlarmSink
 from .breaker import BreakerStateDetector
-from .breaker_mobile import MobileBreakerTracker, MobileMcbStateGate, classify_mcb_crops
+from .breaker_mobile import (
+    MobileBreakerTracker,
+    MobileMcbStateGate,
+    classify_mcb_crops,
+    filter_visible_breaker_controls,
+    merge_breaker_detections,
+    select_coherent_breaker_row,
+)
 from .config import SiteConfig, TaskName
 from .drawing import draw_overlay
 from .events import AlertEvent, Detection
@@ -37,6 +44,7 @@ def run_video(
 
     intrusion_model = None
     breaker_model = None
+    breaker_tiled_model = None
     breaker_mobile_tracker = None
     breaker_mobile_state_gate = None
     if task in ("intrusion", "all"):
@@ -60,6 +68,13 @@ def run_video(
             imgsz=config.runtime.imgsz,
             half=config.runtime.half,
         )
+        if config.breaker.mobile_tiled_detection:
+            breaker_tiled_model = YoloDetector(
+                config.models.breaker_far or config.models.breaker,
+                device=config.runtime.device,
+                imgsz=config.runtime.imgsz,
+                half=config.runtime.half,
+            )
         breaker_mobile_tracker = MobileBreakerTracker(
             iou_threshold=config.breaker.mobile_tracker_iou_threshold,
             max_missing_frames=config.breaker.mobile_tracker_max_missing_frames,
@@ -113,6 +128,36 @@ def run_video(
                 track=breaker_mobile_tracker is not None,
                 tracker=config.breaker.mobile_tracker,
             )
+            breaker_detections = merge_breaker_detections(breaker_detections)
+            used_tiled_detection = False
+            if (
+                breaker_tiled_model is not None
+                and len(breaker_detections) < config.breaker.mobile_tiled_trigger_count
+            ):
+                used_tiled_detection = True
+                tiled_detections = breaker_tiled_model.predict_tiled(
+                    frame,
+                    conf=config.breaker.mobile_tiled_confidence,
+                    iou=config.breaker.iou,
+                    columns=config.breaker.mobile_tiled_columns,
+                    rows=config.breaker.mobile_tiled_rows,
+                    overlap=config.breaker.mobile_tiled_overlap,
+                )
+                tiled_detections = merge_breaker_detections(tiled_detections)
+                tiled_detections = select_coherent_breaker_row(
+                    tiled_detections,
+                    minimum_devices=config.breaker.mobile_tiled_minimum_row_devices,
+                )
+                breaker_detections = merge_breaker_detections(
+                    [*breaker_detections, *tiled_detections]
+                )
+            breaker_detections = filter_visible_breaker_controls(frame, breaker_detections)
+            if (
+                used_tiled_detection
+                and len(breaker_detections)
+                < config.breaker.mobile_tiled_minimum_row_devices
+            ):
+                breaker_detections = []
             if config.breaker.mobile_class_limits:
                 limited = []
                 for class_name, limit in config.breaker.mobile_class_limits.items():

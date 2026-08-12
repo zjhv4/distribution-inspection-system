@@ -5,6 +5,92 @@ from dataclasses import dataclass
 from .events import Detection
 
 
+def merge_breaker_detections(
+    detections: list[Detection],
+    *,
+    iou_threshold: float = 0.35,
+) -> list[Detection]:
+    """Remove duplicate full-frame/tiled boxes, keeping the strongest observation."""
+    kept: list[Detection] = []
+    for detection in sorted(detections, key=lambda item: item.confidence, reverse=True):
+        if all(bbox_iou(detection.bbox, other.bbox) < iou_threshold for other in kept):
+            kept.append(detection)
+    return kept
+
+
+def select_coherent_breaker_row(
+    detections: list[Detection],
+    *,
+    minimum_devices: int = 3,
+    center_tolerance_ratio: float = 0.45,
+) -> list[Detection]:
+    """Reject isolated low-confidence tile hits unless they form a physical device row."""
+    if len(detections) < minimum_devices:
+        return []
+    heights = sorted(max(1.0, item.bbox[3] - item.bbox[1]) for item in detections)
+    median_height = heights[len(heights) // 2]
+    best_group: list[Detection] = []
+    for seed in detections:
+        seed_center = (seed.bbox[1] + seed.bbox[3]) / 2
+        group = [
+            item
+            for item in detections
+            if abs((item.bbox[1] + item.bbox[3]) / 2 - seed_center)
+            <= center_tolerance_ratio * median_height
+        ]
+        if len(group) > len(best_group):
+            best_group = group
+    if len(best_group) < minimum_devices:
+        return []
+    return sorted(best_group, key=lambda item: item.bbox[0])
+
+
+def filter_visible_breaker_controls(frame, detections: list[Detection]) -> list[Detection]:
+    """Drop detections whose operating area is still hidden by a cover or panel edge."""
+    import cv2
+
+    height, width = frame.shape[:2]
+    visible: list[Detection] = []
+    for detection in detections:
+        x1, y1, x2, y2 = detection.bbox
+        left = max(0, min(width, int(round(x1))))
+        top = max(0, min(height, int(round(y1))))
+        right = max(0, min(width, int(round(x2))))
+        bottom = max(0, min(height, int(round(y2))))
+        crop = frame[top:bottom, left:right]
+        if crop.size == 0:
+            continue
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        crop_height, crop_width = gray.shape
+        operating_area = gray[
+            int(0.38 * crop_height) : int(0.88 * crop_height),
+            int(0.10 * crop_width) : int(0.90 * crop_width),
+        ]
+        if operating_area.size == 0:
+            continue
+        dark_fraction = float((operating_area < 100).mean())
+        lower_profile = (gray < 100).mean(axis=1)[int(0.55 * crop_height) :]
+        strong_dark_rows = int((lower_profile >= 0.45).sum())
+        required_dark_rows = max(3, int(0.12 * crop_height))
+        if dark_fraction < 0.15 or strong_dark_rows < required_dark_rows:
+            continue
+        visible.append(
+            Detection(
+                bbox=detection.bbox,
+                confidence=detection.confidence,
+                class_id=detection.class_id,
+                class_name=detection.class_name,
+                metadata={
+                    **detection.metadata,
+                    "control_visible": True,
+                    "control_dark_fraction": dark_fraction,
+                    "control_strong_dark_rows": strong_dark_rows,
+                },
+            )
+        )
+    return visible
+
+
 @dataclass
 class BreakerTrack:
     track_id: str
