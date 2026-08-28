@@ -1,0 +1,15 @@
+{
+  "delivery_version": "2026.08.28",
+  "config": "configs/site.yaml",
+  "required_files": [
+    {"path": "README.md"},
+    {"path": "configs/site.yaml"},
+    {"path": "docs/部署手册.md"},
+    {"path": "examples/intrusion_detection.mp4", "sha256": "426405efa63f4a30f1ece2e35ae9ff548f0ca779d6d6433f4192b2e6249673d3"},
+    {"path": "artifacts/intrusion_detection_result.mp4", "sha256": "2f2a6defc47a05b880d5762a37e6a04f3d724e702cc7e5dfde4f108c4425b8f5"},
+    {"path": "models/delivery/intrusion_power_visible_yolo11l.pt", "sha256": "9ed60d83f6b685c8fd2f80c8c77b2d9da26cafec28e0c12128e5aee23ea4485a"},
+    {"path": "models/delivery/intrusion_legacy_mixed_yolo11l.pt", "sha256": "a72554200809810ad72fc9107baebf2c51c915c9bf6cf912f9edf0c09565b131"},
+    {"path": "models/delivery/breaker_mobile_types_yolo11s.pt", "sha256": "1aaef7ea4c02282a2306cbe6dee6ff1df2b3162c4c2297a3d423895154e7d00e"},
+    {"path": "models/delivery/breaker_mcb_state_yolo11s_cls.pt", "sha256": "4483390aee03ec7815403adeae814651fa58a6722b9d98ef0b584a6c2c0f2cd6"}
+  ]
+}

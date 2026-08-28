@@ -53,7 +53,7 @@ def test_pipeline_releases_resources_after_inference_error(monkeypatch, tmp_path
     monkeypatch.setattr(pipeline.cv2, "VideoCapture", lambda source: capture)
     monkeypatch.setattr(pipeline, "YoloDetector", FailingModel)
     monkeypatch.setattr(pipeline, "JsonlAlarmSink", AlarmSink)
-    config = load_site_config("configs/default.yaml")
+    config = load_site_config("configs/site.yaml")
     config.alarm.jsonl_path = tmp_path / "alerts.jsonl"
     config.alarm.outbox_db_path = tmp_path / "outbox.sqlite3"
 
@@ -83,7 +83,7 @@ def test_pipeline_rejects_unopened_output_writer(monkeypatch, tmp_path: Path) ->
     with pytest.raises(RuntimeError, match="Cannot open output video"):
         pipeline.run_video(
             source="video.mp4",
-            config=load_site_config("configs/default.yaml"),
+            config=load_site_config("configs/site.yaml"),
             task="intrusion",
             output=tmp_path / "missing" / "result.mp4",
         )

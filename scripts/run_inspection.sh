@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PYTHON="${PYTHON:-.venv/bin/python}"
-CONFIG="${CONFIG:-configs/default.yaml}"
+CONFIG="${CONFIG:-configs/site.yaml}"
 TASK="${TASK:-intrusion}"
 SOURCE="${SOURCE:-0}"
 

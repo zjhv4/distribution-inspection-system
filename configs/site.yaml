@@ -1,11 +1,11 @@
 models:
-  intrusion: models/intrusion_legacy_mixed_yolo11l.pt
+  intrusion: models/delivery/intrusion_legacy_mixed_yolo11l.pt
   # 两个人员模型分别对应可见光配电画面和旧 CCTV/热成像画面。
   intrusion_profiles:
-    power_visible: models/intrusion_power_visible_yolo11l.pt
-    legacy_mixed: models/intrusion_legacy_mixed_yolo11l.pt
-  breaker: models/breaker_mobile_types_yolo11s.pt
-  breaker_state_classifier: models/breaker_mcb_state_yolo11s_cls.pt
+    power_visible: models/delivery/intrusion_power_visible_yolo11l.pt
+    legacy_mixed: models/delivery/intrusion_legacy_mixed_yolo11l.pt
+  breaker: models/delivery/breaker_mobile_types_yolo11s.pt
+  breaker_state_classifier: models/delivery/breaker_mcb_state_yolo11s_cls.pt
 
 runtime:
   # 留空时由推理框架自动选择 CPU 或可用 GPU。
@@ -18,7 +18,7 @@ intrusion:
   model_profile: power_visible
   person_class_names: ["person"]
   # 置信度阈值由验证集选定。
-  confidence: 0.45
+  confidence: 0.28
   iou: 0.45
   min_consecutive_frames: 3
   recovery_consecutive_frames: 5
@@ -67,8 +67,7 @@ breaker:
   mobile_state_unknown_margin: 0.15
   mobile_confirm_closed_geometry: true
   mobile_closed_confirm_seconds: 0.5
-  # 按现场设备清单设置同帧上限，不限制设备位置。
-  mobile_class_limits: {MCB: 10, RCD: 2, ISOLATOR: 1}
+  mobile_class_limits: {MCB: 10}
   micro_trip_min_frames: 2
   trip_confirm_frames: 3
   micro_trip_max_frames: 2

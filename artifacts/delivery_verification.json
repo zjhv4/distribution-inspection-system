@@ -1,0 +1,20 @@
+{
+  "delivery_version": "2026.08.28",
+  "config": "configs/site.yaml",
+  "device_policy": "auto",
+  "models": {
+    "intrusion_power_visible_sha256": "9ed60d83f6b685c8fd2f80c8c77b2d9da26cafec28e0c12128e5aee23ea4485a",
+    "intrusion_legacy_mixed_sha256": "a72554200809810ad72fc9107baebf2c51c915c9bf6cf912f9edf0c09565b131",
+    "breaker_devices_sha256": "1aaef7ea4c02282a2306cbe6dee6ff1df2b3162c4c2297a3d423895154e7d00e",
+    "breaker_states_sha256": "4483390aee03ec7815403adeae814651fa58a6722b9d98ef0b584a6c2c0f2cd6"
+  },
+  "regression_tests": "54 passed before delivery layout correction",
+  "test_video": {
+    "source": "examples/intrusion_detection.mp4",
+    "result": "artifacts/intrusion_detection_result.mp4",
+    "resolution": "1280x720",
+    "fps": 10,
+    "frames": 30,
+    "cpu_inference": "passed"
+  }
+}
