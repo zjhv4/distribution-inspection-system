@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import html
+import ipaddress
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+
+DEFAULT_MAX_REQUEST_BYTES = 1024 * 1024
 
 
 class AlarmStore:
@@ -105,22 +111,29 @@ class AlarmStore:
         return database
 
 
-def build_handler(store: AlarmStore):
+def build_handler(
+    store: AlarmStore,
+    *,
+    token: str | None = None,
+    max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
+):
     class AlarmHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
+            if path == "/health":
+                self._send_json(200, {"ok": True})
+                return
+            if not self._authorize():
+                return
             if path in ("/", "/alerts"):
-                limit = int(parse_qs(parsed.query).get("limit", ["100"])[0])
+                limit = _parse_limit(parsed.query)
                 body = render_page(store.latest(limit)).encode("utf-8")
                 self._send(200, body, "text/html; charset=utf-8")
                 return
             if path == "/api/alerts":
-                limit = int(parse_qs(parsed.query).get("limit", ["100"])[0])
+                limit = _parse_limit(parsed.query)
                 self._send_json(200, {"alerts": store.latest(limit), "count": store.count()})
-                return
-            if path == "/health":
-                self._send_json(200, {"ok": True, "stored_alerts": store.count()})
                 return
             if path.startswith("/acks/"):
                 delivery_id = path.removeprefix("/acks/")
@@ -136,7 +149,19 @@ def build_handler(store: AlarmStore):
             if urlparse(self.path).path != "/alerts":
                 self.send_error(404)
                 return
-            length = int(self.headers.get("Content-Length", "0"))
+            if not self._authorize():
+                return
+            try:
+                length = _parse_content_length(
+                    self.headers.get("Content-Length"),
+                    max_request_bytes,
+                )
+            except ValueError:
+                self.send_error(400, "Invalid Content-Length")
+                return
+            except OverflowError:
+                self.send_error(413, "Request body too large")
+                return
             try:
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -151,6 +176,19 @@ def build_handler(store: AlarmStore):
             )
             self._send_json(200, result)
 
+        def _authorize(self) -> bool:
+            provided = self.headers.get("Authorization", "")
+            if _has_valid_token(provided, token):
+                return True
+            body = json.dumps({"error": "unauthorized"}).encode("utf-8")
+            self._send(
+                401,
+                body,
+                "application/json; charset=utf-8",
+                {"WWW-Authenticate": "Bearer"},
+            )
+            return False
+
         def _send_json(self, status: int, payload: dict) -> None:
             self._send(
                 status,
@@ -158,10 +196,19 @@ def build_handler(store: AlarmStore):
                 "application/json; charset=utf-8",
             )
 
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
+        def _send(
+            self,
+            status: int,
+            body: bytes,
+            content_type: str,
+            headers: dict[str, str] | None = None,
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
@@ -169,6 +216,38 @@ def build_handler(store: AlarmStore):
             print(f"{self.address_string()} - {fmt % args}")
 
     return AlarmHandler
+
+
+def _parse_limit(query: str) -> int:
+    try:
+        return int(parse_qs(query).get("limit", ["100"])[0])
+    except ValueError:
+        return 100
+
+
+def _has_valid_token(provided: str, token: str | None) -> bool:
+    return token is None or hmac.compare_digest(provided, f"Bearer {token}")
+
+
+def _parse_content_length(value: str | None, maximum: int) -> int:
+    try:
+        length = int(value or "0")
+    except ValueError as exc:
+        raise ValueError("invalid content length") from exc
+    if length <= 0:
+        raise ValueError("request body required")
+    if length > maximum:
+        raise OverflowError("request body too large")
+    return length
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def render_page(rows: list[dict]) -> str:
@@ -224,18 +303,33 @@ def _payload_delivery_id(payload: dict) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Receive, acknowledge and display edge inspection alarms")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8088)
     parser.add_argument("--store", default="alarms/server_alerts.jsonl")
     parser.add_argument("--database", default=None)
+    parser.add_argument("--token", default=os.getenv("ALARM_TOKEN"))
+    parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     args = parser.parse_args()
+    if not _is_loopback_host(args.host) and not args.token:
+        parser.error("ALARM_TOKEN or --token is required when listening outside localhost")
+    if args.max_request_bytes <= 0:
+        parser.error("--max-request-bytes must be positive")
 
     store = AlarmStore(Path(args.store), Path(args.database) if args.database else None)
-    server = ThreadingHTTPServer((args.host, args.port), build_handler(store))
+    server = ThreadingHTTPServer(
+        (args.host, args.port),
+        build_handler(store, token=args.token, max_request_bytes=args.max_request_bytes),
+    )
     print(f"Alarm server listening on http://{args.host}:{args.port}")
     print(f"Webhook endpoint: http://{args.host}:{args.port}/alerts")
     print(f"Health endpoint: http://{args.host}:{args.port}/health")
-    server.serve_forever()
+    print(f"Authentication: {'enabled' if args.token else 'localhost only'}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

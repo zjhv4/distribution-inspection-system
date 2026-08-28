@@ -20,7 +20,7 @@ class ModelsConfig:
 
 @dataclass
 class RuntimeConfig:
-    device: str = "cpu"
+    device: str | int | None = None
     imgsz: int = 640
     half: bool = False
 

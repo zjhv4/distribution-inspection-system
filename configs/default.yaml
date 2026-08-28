@@ -8,7 +8,8 @@ models:
   breaker_state_classifier: models/breaker_mcb_state_yolo11s_cls.pt
 
 runtime:
-  device: "0"
+  # 留空时由推理框架自动选择 CPU 或可用 GPU。
+  device:
   imgsz: 768
   half: false
 

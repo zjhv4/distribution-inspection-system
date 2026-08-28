@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run edge detection on camera or video")
     run_parser.add_argument("--task", choices=["intrusion", "breaker", "all"], required=True)
     run_parser.add_argument("--source", default="0", help="Camera index or video path")
-    run_parser.add_argument("--config", default="configs/site.yaml")
+    run_parser.add_argument("--config", default="configs/default.yaml")
     run_parser.add_argument("--display", action="store_true")
     run_parser.add_argument("--output", default=None, help="Optional annotated MP4 output path")
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -90,10 +91,13 @@ class JsonlAlarmSink:
         delivery_id = str(row["delivery_id"])
         payload = json.loads(str(row["payload_json"]))
         try:
+            headers = {"Idempotency-Key": delivery_id}
+            if token := os.getenv("ALARM_TOKEN"):
+                headers["Authorization"] = f"Bearer {token}"
             response = requests.post(
                 str(self.config.webhook_url),
                 json=payload,
-                headers={"Idempotency-Key": delivery_id},
+                headers=headers,
                 timeout=self.config.webhook_timeout_seconds,
             )
             response.raise_for_status()

@@ -6,10 +6,20 @@ from typing import Any
 from .events import Detection
 
 
+Device = str | int | None
+
+
 class YoloDetector:
     """Small adapter around Ultralytics YOLO so the rest of the code stays testable."""
 
-    def __init__(self, weights: str | Path, *, device: str = "cpu", imgsz: int = 640, half: bool = False):
+    def __init__(
+        self,
+        weights: str | Path,
+        *,
+        device: Device = None,
+        imgsz: int = 640,
+        half: bool = False,
+    ):
         try:
             from ultralytics import YOLO
         except ImportError as exc:
@@ -33,9 +43,10 @@ class YoloDetector:
             "conf": conf,
             "iou": iou,
             "imgsz": self.imgsz,
-            "device": self.device,
             "verbose": False,
         }
+        if self.device not in (None, "", "auto"):
+            predict_args["device"] = self.device
         if self.half:
             predict_args["half"] = True
         results = (
@@ -76,7 +87,14 @@ class YoloDetector:
 class YoloClassifier:
     """Adapter for Ultralytics classification models, including OpenVINO exports."""
 
-    def __init__(self, weights: str | Path, *, device: str = "cpu", imgsz: int = 224, half: bool = False):
+    def __init__(
+        self,
+        weights: str | Path,
+        *,
+        device: Device = None,
+        imgsz: int = 224,
+        half: bool = False,
+    ):
         try:
             from ultralytics import YOLO
         except ImportError as exc:
@@ -93,7 +111,9 @@ class YoloClassifier:
     def predict_many(self, frames: list[Any]) -> list[Detection]:
         if not frames:
             return []
-        predict_args = {"imgsz": self.imgsz, "device": self.device, "verbose": False}
+        predict_args = {"imgsz": self.imgsz, "verbose": False}
+        if self.device not in (None, "", "auto"):
+            predict_args["device"] = self.device
         if self.half:
             predict_args["half"] = True
         results = self.model.predict(frames, **predict_args)

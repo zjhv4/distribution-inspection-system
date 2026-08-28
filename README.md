@@ -2,6 +2,33 @@
 
 用于配电场景中的人员进入管控和断路器事件处理。
 
+## 快速开始
+
+项目使用 Git LFS 存放模型。首次拉取后先确认模型不是 LFS 指针文件：
+
+```bash
+git lfs install
+git lfs pull
+uv sync --frozen --extra test
+uv run python scripts/verify_delivery.py
+```
+
+运行示例视频：
+
+```bash
+TASK=intrusion SOURCE=examples/intrusion_detection.mp4 scripts/run_inspection.sh
+```
+
+直接使用 CLI 时，默认读取 `configs/default.yaml`：
+
+```bash
+uv run python -m edge_inspection run \
+  --task intrusion \
+  --source examples/intrusion_detection.mp4
+```
+
+`runtime.device` 留空时自动选择可用设备。如需固定使用 CPU 或某张 GPU，在配置中显式填写 `cpu`、`0`、`1` 等值，启动脚本不再强制绑定显卡。
+
 ## 人员进入管控
 
 系统对画面中的人员持续跟踪，并结合电子围栏、身份权限和授权时段判断是否需要告警。
@@ -32,5 +59,30 @@
 - 人员进入、跳闸和微跳事件状态机均已完成告警链路验证；
 - 告警投递测试无重复入库，失败任务可在程序重启后继续处理；
 - 核心回归测试全部通过。
+
+## 告警服务
+
+默认只监听本机：
+
+```bash
+uv run python scripts/alarm_server.py --port 18088
+```
+
+如需监听非本机地址，必须设置访问令牌。推理程序会自动从同一环境变量中取出令牌发送给服务端：
+
+```bash
+export ALARM_TOKEN='replace-with-a-random-secret'
+uv run python scripts/alarm_server.py --host 0.0.0.0 --port 18088
+```
+
+`GET /health` 不需要令牌，告警查询、确认和写入接口需要 `Authorization: Bearer <token>`。
+
+## 验证
+
+```bash
+uv run pytest
+uv run python -m compileall -q edge_inspection scripts tests
+uv build
+```
 
 详细结果见[测试记录](docs/测试记录.md)，配置方法见[配置说明](docs/配置说明.md)。

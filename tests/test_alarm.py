@@ -109,6 +109,43 @@ def test_alarm_sink_accepts_backend_ack(tmp_path, monkeypatch) -> None:
     assert sink.delivery_status(delivery_id) == "ACKED"
 
 
+def test_alarm_sink_sends_token_from_environment(tmp_path, monkeypatch) -> None:
+    captured_headers = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"acknowledged": True, "delivery_id": delivery_id}
+
+    def post(*args, **kwargs):
+        captured_headers.update(kwargs["headers"])
+        return Response()
+
+    monkeypatch.setenv("ALARM_TOKEN", "site-secret")
+    monkeypatch.setattr("edge_inspection.alarm.requests.post", post)
+    sink = JsonlAlarmSink(
+        AlarmConfig(
+            jsonl_path=tmp_path / "alerts.jsonl",
+            save_snapshots=False,
+            webhook_url="http://backend/alerts",
+            background_delivery=False,
+            outbox_db_path=tmp_path / "outbox.sqlite3",
+        )
+    )
+    event = AlertEvent.create(
+        task="intrusion",
+        alert_type="PERSON_INTRUSION",
+        message="intrusion",
+        confidence=0.9,
+        frame_id=1,
+    )
+    delivery_id = delivery_id_for(event.event_id, event.phase)
+    sink.emit(event)
+    assert captured_headers["Authorization"] == "Bearer site-secret"
+
+
 def test_alarm_outbox_retries_after_process_restart(tmp_path, monkeypatch) -> None:
     import requests
 

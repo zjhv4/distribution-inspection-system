@@ -17,6 +17,11 @@ def test_default_config_selects_power_visible_profile() -> None:
     assert resolve_intrusion_weights(config) == "models/intrusion_power_visible_yolo11l.pt"
 
 
+def test_default_config_does_not_bind_a_gpu() -> None:
+    config = load_site_config("configs/default.yaml")
+    assert config.runtime.device is None
+
+
 def test_unknown_intrusion_profile_fails_closed() -> None:
     config = load_site_config("configs/default.yaml")
     config.intrusion.model_profile = "not_declared"
