@@ -9,12 +9,15 @@
     "breaker_states_sha256": "4483390aee03ec7815403adeae814651fa58a6722b9d98ef0b584a6c2c0f2cd6"
   },
   "regression_tests": "54 passed before delivery layout correction",
-  "test_video": {
+  "test_videos": {
     "source": "examples/intrusion_detection.mp4",
-    "result": "artifacts/intrusion_detection_result.mp4",
-    "resolution": "1280x720",
-    "fps": 10,
-    "frames": 30,
-    "cpu_inference": "passed"
+    "annotated_result": "artifacts/gddw_intrusion_chain_annotated_20260803.mp4",
+    "acceptance_all_models": "artifacts/rtx_all_models_annotated.mp4",
+    "acceptance_thermal_intrusion": "artifacts/rtx_intrusion_annotated.mp4"
+  },
+  "video_metadata": {
+    "source_and_annotated": "1280x720, 10 FPS, 30 frames",
+    "acceptance_all_models": "406x720, 3 FPS, 12 frames",
+    "acceptance_thermal_intrusion": "640x512, 3 FPS, 10 frames"
   }
 }

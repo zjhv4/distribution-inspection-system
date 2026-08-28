@@ -17,10 +17,12 @@
 
 ## 测试视频
 
-- [原始测试视频](examples/intrusion_detection.mp4)
-- [人员检测标注结果](artifacts/intrusion_detection_result.mp4)
+- [原始入侵测试视频](examples/intrusion_detection.mp4)
+- [入侵检测标注结果](artifacts/gddw_intrusion_chain_annotated_20260803.mp4)
+- [最新全模型动态验收视频](artifacts/rtx_all_models_annotated.mp4)
+- [最新热成像入侵验收视频](artifacts/rtx_intrusion_annotated.mp4)
 
-两个视频均为 1280×720、10 FPS、3 秒。结果视频使用交付版可见光人员模型在 CPU 上生成。
+原始视频及对应标注结果为 1280×720、10 FPS、3 秒。全模型验收视频为 406×720、3 FPS、4 秒；热成像入侵验收视频为 640×512、3 FPS、约 3.3 秒。验收视频直接取自本地正式验收产物，未使用外部演示素材。
 
 ## 安装
 
@@ -31,7 +33,7 @@ uv sync --frozen --extra test
 uv run python scripts/verify_delivery.py
 ```
 
-`verify_delivery.py` 会检查配置、模型、测试视频、结果视频和 SHA-256。
+`verify_delivery.py` 会检查配置、模型、测试及验收视频和 SHA-256。
 
 ## 运行
 
